@@ -59,12 +59,12 @@ def plot_temperature_field_slices(
 
     # Get grid parameters from config
     nx, ny, nz = T_np.shape
-    dx = config.thermal_dx
-    dy = config.thermal_dy
-    dz = config.thermal_dz
-    Lx = nx * dx
-    Ly = ny * dy
-    Lz = nz * dz
+    dx = config.thermal.dx
+    dy = config.thermal.dy
+    dz = config.thermal.dz
+    Lx = config.thermal.Lx
+    Ly = config.thermal.Ly
+    Lz = config.thermal.Lz
 
     # Default to mid-plane indices if not provided
     if slice_indices is None:
@@ -163,12 +163,12 @@ def plot_tissue_properties(
 
     # Get grid parameters from config
     nx, ny, nz = prop_np.shape
-    dx = config.thermal_dx
-    dy = config.thermal_dy
-    dz = config.thermal_dz
-    Lx = nx * dx
-    Ly = ny * dy
-    Lz = nz * dz
+    dx = config.thermal.dx
+    dy = config.thermal.dy
+    dz = config.thermal.dz
+    Lx = config.thermal.Lx
+    Ly = config.thermal.Ly
+    Lz = config.thermal.Lz
 
     # Default to mid-plane indices if not provided
     if slice_indices is None:
@@ -254,14 +254,14 @@ def plot_temperature_profile(
 
     # Get grid parameters from config
     nx, ny, nz = T_np.shape
-    dx = config.thermal_dx
-    dy = config.thermal_dy
-    dz = config.thermal_dz
+    dx = config.thermal.dx
+    dy = config.thermal.dy
+    dz = config.thermal.dz
 
     # Create coordinate arrays
-    x = np.linspace(0, nx * dx, nx)
-    y = np.linspace(0, ny * dy, ny)
-    z = np.linspace(0, nz * dz, nz)
+    x = np.linspace(0, config.thermal.Lx, nx)
+    y = np.linspace(0, config.thermal.Ly, ny)
+    z = np.linspace(0, config.thermal.Lz, nz)
 
     # Default to center position if not provided
     if position is None:
@@ -312,11 +312,11 @@ def visualize_combined_results(
     slice_indices: Optional[Tuple[int, int, int]] = None,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """
-    Create a combined visualization of acoustic intensity and resulting temperature.
+    Create combined visualization of acoustic intensity and temperature.
 
     Args:
-        acoustic_intensity: 3D acoustic intensity field tensor
-        temperature_field: 3D temperature field tensor
+        acoustic_intensity: Acoustic intensity field [W/m²]
+        temperature_field: Temperature field [°C]
         config: Simulation configuration
         slice_indices: Tuple of (x, y, z) slice indices (if None, uses middle slices)
 
@@ -336,9 +336,12 @@ def visualize_combined_results(
 
     # Get grid parameters
     nx, ny, nz = T_np.shape
-    dx = config.thermal_dx
-    dy = config.thermal_dy
-    dz = config.thermal_dz
+    dx = config.thermal.dx
+    dy = config.thermal.dy
+    dz = config.thermal.dz
+    Lx = config.thermal.Lx
+    Ly = config.thermal.Ly
+    Lz = config.thermal.Lz
 
     # Default to mid-plane indices if not provided
     if slice_indices is None:
@@ -359,7 +362,7 @@ def visualize_combined_results(
     im1 = axes[0, 0].imshow(
         I_np_mW_cm2[:, :, mid_z],
         origin="lower",
-        extent=[0, nx * dx, 0, ny * dy],
+        extent=[0, Lx, 0, Ly],
         cmap="viridis",
         norm="log",
     )
@@ -372,7 +375,7 @@ def visualize_combined_results(
     im2 = axes[0, 1].imshow(
         I_np_mW_cm2[:, mid_y, :],
         origin="lower",
-        extent=[0, nx * dx, 0, nz * dz],
+        extent=[0, Lx, 0, Lz],
         cmap="viridis",
         norm="log",
     )
@@ -385,7 +388,7 @@ def visualize_combined_results(
     im3 = axes[0, 2].imshow(
         I_np_mW_cm2[mid_x, :, :],
         origin="lower",
-        extent=[0, ny * dy, 0, nz * dz],
+        extent=[0, Ly, 0, Lz],
         cmap="viridis",
         norm="log",
     )
@@ -395,43 +398,48 @@ def visualize_combined_results(
     plt.colorbar(im3, ax=axes[0, 2], label="Intensity [mW/cm²]")
 
     # Second row: Temperature
+    # Calculate temperature rise from baseline
+    T_rise = T_np - config.thermal.arterial_temperature
+
     # XY plane
     im4 = axes[1, 0].imshow(
-        T_np[:, :, mid_z],
+        T_rise[:, :, mid_z],
         origin="lower",
-        extent=[0, nx * dx, 0, ny * dy],
+        extent=[0, Lx, 0, Ly],
         cmap="hot",
     )
-    axes[1, 0].set_title(f"Temperature: XY Plane (Z={mid_z*dz*1000:.1f}mm)")
+    axes[1, 0].set_title(f"Temperature Rise: XY Plane (Z={mid_z*dz*1000:.1f}mm)")
     axes[1, 0].set_xlabel("X [m]")
     axes[1, 0].set_ylabel("Y [m]")
-    plt.colorbar(im4, ax=axes[1, 0], label="Temperature [°C]")
+    plt.colorbar(im4, ax=axes[1, 0], label="Temperature Rise [°C]")
 
     # XZ plane
     im5 = axes[1, 1].imshow(
-        T_np[:, mid_y, :],
+        T_rise[:, mid_y, :],
         origin="lower",
-        extent=[0, nx * dx, 0, nz * dz],
+        extent=[0, Lx, 0, Lz],
         cmap="hot",
     )
-    axes[1, 1].set_title(f"Temperature: XZ Plane (Y={mid_y*dy*1000:.1f}mm)")
+    axes[1, 1].set_title(f"Temperature Rise: XZ Plane (Y={mid_y*dy*1000:.1f}mm)")
     axes[1, 1].set_xlabel("X [m]")
     axes[1, 1].set_ylabel("Z [m]")
-    plt.colorbar(im5, ax=axes[1, 1], label="Temperature [°C]")
+    plt.colorbar(im5, ax=axes[1, 1], label="Temperature Rise [°C]")
 
     # YZ plane
     im6 = axes[1, 2].imshow(
-        T_np[mid_x, :, :],
+        T_rise[mid_x, :, :],
         origin="lower",
-        extent=[0, ny * dy, 0, nz * dz],
+        extent=[0, Ly, 0, Lz],
         cmap="hot",
     )
-    axes[1, 2].set_title(f"Temperature: YZ Plane (X={mid_x*dx*1000:.1f}mm)")
+    axes[1, 2].set_title(f"Temperature Rise: YZ Plane (X={mid_x*dx*1000:.1f}mm)")
     axes[1, 2].set_xlabel("Y [m]")
     axes[1, 2].set_ylabel("Z [m]")
-    plt.colorbar(im6, ax=axes[1, 2], label="Temperature [°C]")
+    plt.colorbar(im6, ax=axes[1, 2], label="Temperature Rise [°C]")
 
-    fig.suptitle("Acoustic Intensity and Resulting Temperature Distribution")
+    # Add overall title
+    fig.suptitle("Acoustic Intensity and Temperature Distribution", fontsize=16)
     plt.tight_layout()
+    plt.subplots_adjust(top=0.92)
 
     return fig, axes

@@ -27,13 +27,13 @@ class SkullPressureSimulator:
     def setup_grid(self) -> kWaveGrid:
         """Create and configure the k-Wave grid."""
         self.kgrid = kWaveGrid(
-            [self.config.Nx, self.config.Ny, self.config.Nz],
-            [self.config.dx, self.config.dy, self.config.dz],
+            [self.config.acoustic.Nx, self.config.acoustic.Ny, self.config.acoustic.Nz],
+            [self.config.acoustic.dx, self.config.acoustic.dy, self.config.acoustic.dz],
         )
 
         # Calculate time step
         c_max = self.config.skull.sound_speed  # use maximum sound speed for stability
-        self.kgrid.makeTime(c_max, t_end=self.config.t_end)
+        self.kgrid.makeTime(c_max, t_end=self.config.acoustic.t_end)
 
         return self.kgrid
 
@@ -46,14 +46,14 @@ class SkullPressureSimulator:
         self.medium = kWaveMedium(
             sound_speed=self.config.brain.sound_speed * np.ones(self.kgrid.k.shape),
             density=self.config.brain.density * np.ones(self.kgrid.k.shape),
-            alpha_coeff=self.config.alpha_coeff,
-            alpha_power=self.config.alpha_power,
-            BonA=self.config.BonA,
+            alpha_coeff=self.config.acoustic.alpha_coeff,
+            alpha_power=self.config.acoustic.alpha_power,
+            BonA=self.config.acoustic.BonA,
         )
 
         # Convert thicknesses to grid points
-        skin_points = round(self.config.skin.thickness / self.config.dx)
-        skull_points = round(self.config.skull.thickness / self.config.dx)
+        skin_points = round(self.config.skin.thickness / self.config.acoustic.dx)
+        skull_points = round(self.config.skull.thickness / self.config.acoustic.dx)
         z_start = self.config.initial_tissue_z
 
         # Add skin layer
@@ -82,25 +82,27 @@ class SkullPressureSimulator:
 
         # Create time varying source
         source_signal = tone_burst(
-            1 / self.kgrid.dt, self.config.freq, self.config.num_cycles
+            1 / self.kgrid.dt,
+            self.config.acoustic.freq,
+            self.config.acoustic.num_cycles,
         )
-        source_signal = self.config.source_magnitude * source_signal
+        source_signal = self.config.acoustic.source_magnitude * source_signal
 
         # Define source mask for plane wave
-        source_x_size = self.config.num_elements_x * (
-            self.config.pitch / self.config.dx
+        source_x_size = self.config.acoustic.num_elements_x * (
+            self.config.acoustic.pitch / self.config.acoustic.dx
         )
-        source_y_size = self.config.num_elements_y * (
-            self.config.pitch / self.config.dy
+        source_y_size = self.config.acoustic.num_elements_y * (
+            self.config.acoustic.pitch / self.config.acoustic.dy
         )
-        x_start = round((self.config.Nx - source_x_size) / 2)
-        y_start = round((self.config.Ny - source_y_size) / 2)
+        x_start = round((self.config.acoustic.Nx - source_x_size) / 2)
+        y_start = round((self.config.acoustic.Ny - source_y_size) / 2)
 
         source_mask = np.zeros(self.kgrid.k.shape)
         source_mask[
             x_start : x_start + int(source_x_size),
             y_start : y_start + int(source_y_size),
-            self.config.source_z_pos,
+            self.config.acoustic.source_z_pos,
         ] = 1
 
         # Create source
@@ -125,7 +127,7 @@ class SkullPressureSimulator:
         # Set simulation options
         simulation_options = SimulationOptions(
             pml_inside=False,
-            pml_size=self.config.pml_size,
+            pml_size=self.config.acoustic.pml_size,
             data_cast="single",
             save_to_disk=True,
             data_recast=True,
@@ -143,51 +145,6 @@ class SkullPressureSimulator:
         )
 
         return self.sensor_data
-
-    def save_results(self, filename: str) -> None:
-        """Save simulation results and configuration to HDF5 file."""
-        if self.sensor_data is None:
-            raise RuntimeError("No simulation data to save")
-
-        with h5py.File(filename, "w") as f:
-            # Create groups
-            pressure_group = f.create_group("pressure_data")
-            grid_group = f.create_group("grid_params")
-            time_group = f.create_group("time_params")
-            transducer_group = f.create_group("transducer_params")
-            layers_group = f.create_group("tissue_layers")
-
-            # Save pressure data
-            pressure_group.create_dataset("p", data=self.sensor_data["p"])
-
-            # Save all configuration parameters using the to_dict method
-            config_dict = self.config.to_dict()
-
-            # Save grid parameters
-            for key, value in config_dict["grid"].items():
-                grid_group.attrs[key] = value
-
-            # Save time parameters
-            for key, value in config_dict["time"].items():
-                time_group.attrs[key] = value
-
-            if hasattr(self.kgrid, "dt"):
-                time_group.attrs["dt"] = self.kgrid.dt
-
-            # Save transducer parameters
-            for key, value in config_dict["transducer"].items():
-                transducer_group.attrs[key] = value
-
-            # Save tissue layer parameters
-            for tissue_name, tissue_props in config_dict["tissues"].items():
-                tissue_group = layers_group.create_group(tissue_name)
-                for key, value in tissue_props.items():
-                    tissue_group.attrs[key] = value
-
-            # Save medium properties
-            medium_group = f.create_group("medium_properties")
-            for key, value in config_dict["medium"].items():
-                medium_group.attrs[key] = value
 
     def compute_intensity(
         self, pressure_data: np.ndarray
@@ -221,7 +178,9 @@ class SkullPressureSimulator:
         average_intensity_over_simulation = avg_pressure_squared / (2 * impedance)
 
         # Compute time-averaged intensity
-        duty_cycle = self.config.pulse_repetition_freq * self.config.t_end
+        duty_cycle = (
+            self.config.acoustic.pulse_repetition_freq * self.config.acoustic.t_end
+        )
         average_intensity = average_intensity_over_simulation * duty_cycle
 
         return average_intensity

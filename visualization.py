@@ -9,11 +9,11 @@ import matplotlib.animation as animation
 def plot_medium_properties(
     medium_sound_speed: np.ndarray,
     config: SimulationConfig,
-    slice_y: int = None,
+    slice_y: int | None = None,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """Plot the sound speed distribution in tissue layers."""
     if slice_y is None:
-        slice_y = config.Ny // 2
+        slice_y = config.acoustic.Ny // 2
 
     fig, ax = plt.subplots(figsize=(12, 8))
     im = ax.imshow(medium_sound_speed[:, slice_y, :].T, aspect="auto", cmap="viridis")
@@ -24,8 +24,8 @@ def plot_medium_properties(
 
     # Add layer annotations
     z_start = config.initial_tissue_z
-    skin_points = round(config.skin.thickness / config.dx)
-    skull_points = round(config.skull.thickness / config.dx)
+    skin_points = round(config.skin.thickness / config.acoustic.dx)
+    skull_points = round(config.skull.thickness / config.acoustic.dx)
 
     # Add horizontal lines for layer boundaries
     ax.axhline(y=z_start, color="w", linestyle="--", alpha=0.5)
@@ -35,9 +35,16 @@ def plot_medium_properties(
     )
 
     # Add layer labels
-    ax.text(config.Nx // 2, z_start - 5, "Water", color="w", ha="center", fontsize=12)
     ax.text(
-        config.Nx // 2,
+        config.acoustic.Nx // 2,
+        z_start - 5,
+        "Water",
+        color="w",
+        ha="center",
+        fontsize=12,
+    )
+    ax.text(
+        config.acoustic.Nx // 2,
         z_start + skin_points // 2,
         "Skin",
         color="w",
@@ -45,7 +52,7 @@ def plot_medium_properties(
         fontsize=12,
     )
     ax.text(
-        config.Nx // 2,
+        config.acoustic.Nx // 2,
         z_start + skin_points + skull_points // 2,
         "Skull",
         color="w",
@@ -53,7 +60,7 @@ def plot_medium_properties(
         fontsize=12,
     )
     ax.text(
-        config.Nx // 2,
+        config.acoustic.Nx // 2,
         z_start + skin_points + skull_points + 10,
         "Brain",
         color="w",
@@ -62,8 +69,10 @@ def plot_medium_properties(
     )
 
     # Add transducer array visualization
-    source_x_size = config.num_elements_x * (config.pitch / config.dx)
-    x_start = round((config.Nx - source_x_size) / 2)
+    source_x_size = config.acoustic.num_elements_x * (
+        config.acoustic.pitch / config.acoustic.dx
+    )
+    x_start = round((config.acoustic.Nx - source_x_size) / 2)
     transducer_height = 3
     rect = Rectangle(
         (x_start, 10),
@@ -75,7 +84,12 @@ def plot_medium_properties(
     )
     ax.add_patch(rect)
     ax.text(
-        config.Nx // 2, 8, "Transducer Array", color="red", ha="center", fontsize=12
+        config.acoustic.Nx // 2,
+        8,
+        "Transducer Array",
+        color="red",
+        ha="center",
+        fontsize=12,
     )
 
     return fig, ax
@@ -85,13 +99,14 @@ def plot_pressure_field(
     pressure_data: np.ndarray,
     time_step: int,
     config: SimulationConfig,
-    slice_y: int = None,
+    slice_y: int | None = None,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """Plot the pressure field at a specific time step."""
     if slice_y is None:
-        slice_y = config.Ny // 2
+        slice_y = config.acoustic.Ny // 2
 
-    fig, ax = plt.subplots(figsize=(10, 8))
+    fig, ax = plt.subplots(figsize=(12, 8))
+    # Take a slice at the specified Y position
     im = ax.imshow(
         pressure_data[time_step, :, slice_y, :].T,
         cmap="coolwarm",
@@ -122,7 +137,7 @@ def plot_intensity_field(
         Figure and axes objects
     """
     if slice_y is None:
-        slice_y = config.Ny // 2
+        slice_y = config.acoustic.Ny // 2
 
     fig, ax = plt.subplots(figsize=(10, 8))
     im = ax.imshow(

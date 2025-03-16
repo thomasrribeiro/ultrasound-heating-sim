@@ -43,16 +43,16 @@ sensor_data = simulator.run_simulation(use_gpu=True)
 # %% Process and reshape the pressure data
 pressure_data = sensor_data["p"].reshape(
     -1,  # time steps
-    config.Nx,
-    config.Ny,
-    config.Nz - config.initial_tissue_z,
+    config.acoustic.Nx,
+    config.acoustic.Ny,
+    config.acoustic.Nz - config.initial_tissue_z,
     order="F",
 )
 
 #%%
 # plot max pressure
 max_pressure = np.max(pressure_data, axis=0)
-plt.imshow(1e-6 * max_pressure[:, config.Ny // 2, :].T, cmap="coolwarm")
+plt.imshow(1e-6 * max_pressure[:, config.acoustic.Ny // 2, :].T, cmap="coolwarm")
 plt.colorbar(label="Max Pressure [MPa]")
 plt.title("Max Pressure Field")
 plt.xlabel("X position [grid points]")
@@ -77,5 +77,5 @@ plt.close()
 #%%
 average_intensity.shape
 
-#%%
-np.save("average_intensity.npy", average_intensity)
+# %% Save intensity data
+np.save("data/average_intensity.npy", average_intensity)

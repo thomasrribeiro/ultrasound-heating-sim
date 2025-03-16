@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 import torch
 import numpy as np
@@ -29,10 +29,8 @@ class TissueProperties:
 
 
 @dataclass
-class SimulationConfig:
-    # --------------------------#
-    # ACOUSTIC SIMULATION PART #
-    # --------------------------#
+class AcousticConfig:
+    """Configuration parameters for the acoustic simulation."""
 
     # Transducer parameters
     freq: float = 2e6  # 2 MHz frequency
@@ -43,34 +41,92 @@ class SimulationConfig:
     source_magnitude: float = 1e6  # [Pa]
     pulse_repetition_freq: float = 2.7e3  # [Hz]
 
-    # Acoustic grid parameters
-    dx: float = pitch  # spatial step [m]
-    dy: float = pitch
-    dz: float = pitch
+    # Grid parameters
+    dx: float = field(init=False)  # spatial step [m]
+    dy: float = field(init=False)
+    dz: float = field(init=False)
     pml_size: int = 10
-    Nx: int = 256 - 2 * pml_size
-    Ny: int = 128 - 2 * pml_size
-    Nz: int = 128 - 2 * pml_size
+    Nx: int = 256 - 2 * 10  # using pml_size in default value doesn't work
+    Ny: int = 128 - 2 * 10
+    Nz: int = 128 - 2 * 10
 
-    # Acoustic time parameters
+    # Time parameters
     cfl: float = 0.3
     t_end: float = 25e-6  # [s]
 
-    # Acoustic medium properties
+    # Medium properties
     alpha_coeff: float = 0.75
     alpha_power: float = 1.5
     BonA: float = 6
 
     # Source and sensor positions
     source_z_pos: int = 10
-    initial_tissue_z: int = 20
 
-    # Blood properties (shared between acoustic and thermal parts)
+    def __post_init__(self):
+        # Initialize spatial steps based on pitch
+        self.dx = self.pitch
+        self.dy = self.pitch
+        self.dz = self.pitch
+
+
+@dataclass
+class ThermalConfig:
+    """Configuration parameters for the thermal simulation."""
+
+    # Grid parameters
+    use_acoustic_grid: bool = False  # If True, use same grid as acoustic sim
+    nx: int = 30  # number of cells in x direction
+    ny: int = 30  # number of cells in y direction
+    nz: int = 30  # number of cells in z direction
+    dx: float = 0.001  # cell size in x direction [m]
+    dy: float = 0.001  # cell size in y direction [m]
+    dz: float = 0.001  # cell size in z direction [m]
+
+    # Time stepping parameters
+    dt: float = 0.01  # time step [s]
+    steps: int = 500  # number of time steps
+    save_every: int = 50  # save visualization every N steps
+
+    # Heat source parameters (will be overridden by acoustic intensity)
+    source_magnitude: float = 1e4  # heat source magnitude [W/m^3]
+    source_sigma: float = 0.001  # width of Gaussian heat source [m]
+
+    # Blood properties
     blood_density: float = 1000  # [kg/m^3]
     blood_specific_heat: float = 3600  # [J/(kg·K)]
     arterial_temperature: float = 37.0  # [°C]
 
-    # Tissue layers (acoustic properties)
+    # Derived parameters
+    Lx: float = field(init=False)  # domain size [m]
+    Ly: float = field(init=False)
+    Lz: float = field(init=False)
+
+    def __post_init__(self):
+        # Compute domain size
+        self.Lx = self.nx * self.dx
+        self.Ly = self.ny * self.dy
+        self.Lz = self.nz * self.dz
+
+    def update_from_acoustic_grid(self, acoustic_config: AcousticConfig):
+        """Update thermal grid parameters to match acoustic grid."""
+        if self.use_acoustic_grid:
+            self.nx = acoustic_config.Nx
+            self.ny = acoustic_config.Ny
+            self.nz = acoustic_config.Nz
+            self.dx = acoustic_config.dx
+            self.dy = acoustic_config.dy
+            self.dz = acoustic_config.dz
+            # Update derived parameters
+            self.Lx = self.nx * self.dx
+            self.Ly = self.ny * self.dy
+            self.Lz = self.nz * self.dz
+
+
+@dataclass
+class SimulationConfig:
+    """Complete simulation configuration containing both acoustic and thermal parts."""
+
+    # Tissue layers
     skin: TissueProperties = TissueProperties(
         sound_speed=1610,  # [m/s]
         density=1090,  # [kg/m^3]
@@ -100,58 +156,30 @@ class SimulationConfig:
         blood_perfusion_rate=0.008,  # [1/s]
     )
 
-    # -------------------------#
-    # THERMAL SIMULATION PART #
-    # -------------------------#
+    # Separate configurations
+    acoustic: AcousticConfig = field(default_factory=AcousticConfig)
+    thermal: ThermalConfig = field(default_factory=ThermalConfig)
 
-    # Thermal grid parameters (can be different from acoustic grid)
-    thermal_use_same_grid: bool = False  # If True, use same grid as acoustic sim
-    thermal_nx: int = 30  # number of cells in x direction
-    thermal_ny: int = 30  # number of cells in y direction
-    thermal_nz: int = 30  # number of cells in z direction
-    thermal_dx: float = 0.001  # cell size in x direction [m]
-    thermal_dy: float = 0.001  # cell size in y direction [m]
-    thermal_dz: float = 0.001  # cell size in z direction [m]
-
-    # Thermal time stepping parameters
-    thermal_dt: float = 0.01  # time step [s]
-    thermal_steps: int = 500  # number of time steps
-    thermal_save_every: int = 50  # save visualization every N steps
-
-    # Thermal heat source parameters (will be overridden by acoustic intensity)
-    thermal_source_magnitude: float = 1e4  # heat source magnitude [W/m^3]
-    thermal_source_sigma: float = 0.001  # width of Gaussian heat source [m]
+    initial_tissue_z: int = 20
 
     def __post_init__(self):
-        # Calculate derived parameters
-        if self.thermal_use_same_grid:
-            # Use the same grid as the acoustic simulation
-            self.thermal_nx = self.Nx
-            self.thermal_ny = self.Ny
-            self.thermal_nz = self.Nz
-            self.thermal_dx = self.dx
-            self.thermal_dy = self.dy
-            self.thermal_dz = self.dz
-
-        # Derived thermal grid dimensions
-        self.thermal_Lx = self.thermal_nx * self.thermal_dx
-        self.thermal_Ly = self.thermal_ny * self.thermal_dy
-        self.thermal_Lz = self.thermal_nz * self.thermal_dz
+        # Update thermal grid if needed
+        self.thermal.update_from_acoustic_grid(self.acoustic)
 
         # Compute blood perfusion coefficient for thermal simulation (B = ρ_b·c_b·w_b)
         self.skin.B = (
-            self.blood_density
-            * self.blood_specific_heat
+            self.thermal.blood_density
+            * self.thermal.blood_specific_heat
             * self.skin.blood_perfusion_rate
         )
         self.skull.B = (
-            self.blood_density
-            * self.blood_specific_heat
+            self.thermal.blood_density
+            * self.thermal.blood_specific_heat
             * self.skull.blood_perfusion_rate
         )
         self.brain.B = (
-            self.blood_density
-            * self.blood_specific_heat
+            self.thermal.blood_density
+            * self.thermal.blood_specific_heat
             * self.brain.blood_perfusion_rate
         )
 
@@ -169,7 +197,7 @@ class SimulationConfig:
         # Initialize the layer map with all brain tissue (value 2)
         layer_map = (
             torch.ones(
-                (self.thermal_nx, self.thermal_ny, self.thermal_nz),
+                (self.thermal.nx, self.thermal.ny, self.thermal.nz),
                 dtype=torch.long,
                 device=device,
             )
@@ -177,8 +205,8 @@ class SimulationConfig:
         )
 
         # Convert tissue thicknesses to grid points
-        skin_thickness_points = int(self.skin.thickness / self.thermal_dz)
-        skull_thickness_points = int(self.skull.thickness / self.thermal_dz)
+        skin_thickness_points = int(self.skin.thickness / self.thermal.dz)
+        skull_thickness_points = int(self.skull.thickness / self.thermal.dz)
 
         # Start positions for layers (assuming layers are along z direction)
         skin_start = 0  # Start at the top of the domain
@@ -197,61 +225,61 @@ class SimulationConfig:
     def to_dict(self) -> Dict[str, Any]:
         """Convert the config to a dictionary for saving."""
         return {
+            "initial_tissue_z": self.initial_tissue_z,
             "acoustic": {
                 "transducer": {
-                    "frequency": self.freq,
-                    "num_cycles": self.num_cycles,
-                    "pitch": self.pitch,
-                    "num_elements_x": self.num_elements_x,
-                    "num_elements_y": self.num_elements_y,
-                    "source_magnitude": self.source_magnitude,
-                    "pulse_repetition_freq": self.pulse_repetition_freq,
+                    "frequency": self.acoustic.freq,
+                    "num_cycles": self.acoustic.num_cycles,
+                    "pitch": self.acoustic.pitch,
+                    "num_elements_x": self.acoustic.num_elements_x,
+                    "num_elements_y": self.acoustic.num_elements_y,
+                    "source_magnitude": self.acoustic.source_magnitude,
+                    "pulse_repetition_freq": self.acoustic.pulse_repetition_freq,
                 },
                 "grid": {
-                    "dx": self.dx,
-                    "dy": self.dy,
-                    "dz": self.dz,
-                    "Nx": self.Nx,
-                    "Ny": self.Ny,
-                    "Nz": self.Nz,
-                    "pml_size": self.pml_size,
+                    "dx": self.acoustic.dx,
+                    "dy": self.acoustic.dy,
+                    "dz": self.acoustic.dz,
+                    "Nx": self.acoustic.Nx,
+                    "Ny": self.acoustic.Ny,
+                    "Nz": self.acoustic.Nz,
+                    "pml_size": self.acoustic.pml_size,
                 },
                 "time": {
-                    "cfl": self.cfl,
-                    "t_end": self.t_end,
+                    "cfl": self.acoustic.cfl,
+                    "t_end": self.acoustic.t_end,
                 },
                 "medium": {
-                    "alpha_coeff": self.alpha_coeff,
-                    "alpha_power": self.alpha_power,
-                    "BonA": self.BonA,
+                    "alpha_coeff": self.acoustic.alpha_coeff,
+                    "alpha_power": self.acoustic.alpha_power,
+                    "BonA": self.acoustic.BonA,
                 },
                 "positions": {
-                    "source_z": self.source_z_pos,
-                    "initial_tissue_z": self.initial_tissue_z,
+                    "source_z": self.acoustic.source_z_pos,
                 },
             },
             "thermal": {
                 "grid": {
-                    "nx": self.thermal_nx,
-                    "ny": self.thermal_ny,
-                    "nz": self.thermal_nz,
-                    "dx": self.thermal_dx,
-                    "dy": self.thermal_dy,
-                    "dz": self.thermal_dz,
+                    "nx": self.thermal.nx,
+                    "ny": self.thermal.ny,
+                    "nz": self.thermal.nz,
+                    "dx": self.thermal.dx,
+                    "dy": self.thermal.dy,
+                    "dz": self.thermal.dz,
                 },
                 "time": {
-                    "dt": self.thermal_dt,
-                    "steps": self.thermal_steps,
-                    "save_every": self.thermal_save_every,
+                    "dt": self.thermal.dt,
+                    "steps": self.thermal.steps,
+                    "save_every": self.thermal.save_every,
                 },
                 "source": {
-                    "magnitude": self.thermal_source_magnitude,
-                    "sigma": self.thermal_source_sigma,
+                    "magnitude": self.thermal.source_magnitude,
+                    "sigma": self.thermal.source_sigma,
                 },
                 "blood": {
-                    "density": self.blood_density,
-                    "specific_heat": self.blood_specific_heat,
-                    "arterial_temperature": self.arterial_temperature,
+                    "density": self.thermal.blood_density,
+                    "specific_heat": self.thermal.blood_specific_heat,
+                    "arterial_temperature": self.thermal.arterial_temperature,
                 },
             },
             "tissues": {

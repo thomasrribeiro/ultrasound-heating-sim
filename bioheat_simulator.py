@@ -59,17 +59,17 @@ class BioheatSimulator:
     def setup_mesh(self):
         """Set up the computational grid."""
         # Create grid dimensions from config
-        self.nx = self.config.thermal_nx
-        self.ny = self.config.thermal_ny
-        self.nz = self.config.thermal_nz
-        self.dx = self.config.thermal_dx
-        self.dy = self.config.thermal_dy
-        self.dz = self.config.thermal_dz
+        self.nx = self.config.thermal.nx
+        self.ny = self.config.thermal.ny
+        self.nz = self.config.thermal.nz
+        self.dx = self.config.thermal.dx
+        self.dy = self.config.thermal.dy
+        self.dz = self.config.thermal.dz
 
         # Calculate domain size
-        self.Lx = self.nx * self.dx
-        self.Ly = self.ny * self.dy
-        self.Lz = self.nz * self.dz
+        self.Lx = self.config.thermal.Lx
+        self.Ly = self.config.thermal.Ly
+        self.Lz = self.config.thermal.Lz
 
         # Create coordinate meshgrid for visualization purposes
         self.x = np.linspace(0, self.Lx, self.nx)
@@ -80,7 +80,7 @@ class BioheatSimulator:
         # Initialize temperature field with arterial temperature
         self.T = (
             torch.ones((self.nx, self.ny, self.nz), device=self.device)
-            * self.config.arterial_temperature
+            * self.config.thermal.arterial_temperature
         )
 
         # Create coordinate meshgrid on GPU for heat source calculation
@@ -119,7 +119,7 @@ class BioheatSimulator:
         )
         self.T_a = (
             torch.ones((self.nx, self.ny, self.nz), device=self.device)
-            * self.config.arterial_temperature
+            * self.config.thermal.arterial_temperature
         )
         self.absorption = (
             torch.ones((self.nx, self.ny, self.nz), device=self.device)
@@ -159,7 +159,9 @@ class BioheatSimulator:
         self.A = self.rho * self.c  # [J/(m³·K)]
         self.Kt = self.k  # [W/(m·K)]
         self.B = (
-            self.config.blood_density * self.config.blood_specific_heat * self.w_b
+            self.config.thermal.blood_density
+            * self.config.thermal.blood_specific_heat
+            * self.w_b
         )  # [W/(m³·K)]
 
         return self.rho, self.c, self.k, self.w_b
@@ -186,8 +188,9 @@ class BioheatSimulator:
 
             # Apply a scaling factor based on the pulse repetition frequency
             # (since acoustic intensity is often time-averaged but we need instantaneous power)
-            duty_cycle = self.config.num_cycles / (
-                self.config.freq * (1.0 / self.config.pulse_repetition_freq)
+            duty_cycle = self.config.acoustic.num_cycles / (
+                self.config.acoustic.freq
+                * (1.0 / self.config.acoustic.pulse_repetition_freq)
             )
             if duty_cycle > 0 and duty_cycle < 1:
                 # Scale up by inverse of duty cycle to get instantaneous heating power
@@ -197,9 +200,9 @@ class BioheatSimulator:
             center_x = self.Lx / 2
             center_y = self.Ly / 2
             center_z = self.Lz / 2
-            sigma = self.config.thermal_source_sigma
+            sigma = self.config.thermal.source_sigma
 
-            self.Q = self.config.thermal_source_magnitude * torch.exp(
+            self.Q = self.config.thermal.source_magnitude * torch.exp(
                 -(
                     (self.X_t - center_x) ** 2
                     + (self.Y_t - center_y) ** 2
@@ -359,9 +362,9 @@ class BioheatSimulator:
             )
 
         # Get time stepping parameters from config
-        dt = self.config.thermal_dt
-        steps = self.config.thermal_steps
-        save_every = self.config.thermal_save_every
+        dt = self.config.thermal.dt
+        steps = self.config.thermal.steps
+        save_every = self.config.thermal.save_every
 
         # Initialize time and history arrays
         start_time = time.time()
