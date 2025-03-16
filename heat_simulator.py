@@ -5,7 +5,7 @@ import time
 from typing import Dict, Any, Tuple, Optional
 import h5py
 
-from simulation_config import SimulationConfig
+from config import SimulationConfig
 
 
 class BioheatSimulator:

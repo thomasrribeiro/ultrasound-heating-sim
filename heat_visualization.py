@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Tuple, Optional
 import torch
-from simulation_config import SimulationConfig
+from config import SimulationConfig
 
 
 def plot_temperature_evolution(

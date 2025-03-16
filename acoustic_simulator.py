@@ -1,5 +1,4 @@
 import numpy as np
-import h5py
 from typing import Tuple, Optional
 from dataclasses import dataclass
 
@@ -12,7 +11,7 @@ from kwave.options.simulation_execution_options import SimulationExecutionOption
 from kwave.options.simulation_options import SimulationOptions
 from kwave.utils.signals import tone_burst
 
-from simulation_config import SimulationConfig
+from config import SimulationConfig
 
 
 class SkullPressureSimulator:

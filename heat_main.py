@@ -10,13 +10,12 @@ import os
 import argparse
 from pathlib import Path
 
-from simulation_config import SimulationConfig
-from bioheat_simulator import BioheatSimulator
-from bioheat_visualization import (
+from config import SimulationConfig
+from heat_simulator import BioheatSimulator
+from heat_visualization import (
     plot_temperature_evolution,
     plot_temperature_field_slices,
     plot_tissue_properties,
-    plot_temperature_profile,
     visualize_combined_results,
 )
 

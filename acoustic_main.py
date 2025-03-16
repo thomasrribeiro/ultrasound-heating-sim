@@ -1,12 +1,14 @@
 # %% Imports
 try:
-    %load_ext autoreload
-    %autoreload 2
+    import IPython
+
+    IPython.get_ipython().run_line_magic("load_ext", "autoreload")
+    IPython.get_ipython().run_line_magic("autoreload", "2")
 except:
     pass
-from simulation_config import SimulationConfig
-from skull_pressure_simulator import SkullPressureSimulator
-from visualization import (
+from config import SimulationConfig
+from acoustic_simulator import SkullPressureSimulator
+from acoustic_visualization import (
     plot_medium_properties,
     plot_intensity_field,
 )
@@ -49,7 +51,7 @@ pressure_data = sensor_data["p"].reshape(
     order="F",
 )
 
-#%%
+# %%
 # plot max pressure
 max_pressure = np.max(pressure_data, axis=0)
 plt.imshow(1e-6 * max_pressure[:, config.acoustic.Ny // 2, :].T, cmap="coolwarm")
@@ -74,7 +76,7 @@ fig, ax = plot_intensity_field(
 plt.show()
 plt.close()
 
-#%%
+# %%
 average_intensity.shape
 
 # %% Save intensity data
