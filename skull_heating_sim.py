@@ -160,7 +160,7 @@ source.p = source_signal
 # %% Setup Sensor
 # Create sensor mask
 sensor_mask = np.zeros(kgrid.k.shape)
-sensor_mask[:, Ny // 2, z_start:] = 1  # Record pressure in tissue layers
+sensor_mask[:, :, z_start:] = 1  # Record pressure in tissue layers
 
 # Create sensor object
 sensor = kSensor(sensor_mask, record=["p"])
@@ -186,26 +186,14 @@ sensor_data = kspaceFirstOrder3D(
     execution_options=SimulationExecutionOptions(is_gpu_simulation=True),
 )
 
-# # %%
-# d = sensor_data["p_max"].reshape(Nx, Nz - z_start, order="F")
-
-# plt.figure(figsize=(10, 8))
-# plt.imshow(d.T, cmap="coolwarm")
-# plt.colorbar(label="Pressure [Pa]")
-# plt.title("Pressure Field in Tissue Layers")
-# plt.xlabel("X position [grid points]")
-# plt.ylabel("Z position [grid points]")
-# plt.show()
-
 # %%
 sensor_data["p"].shape
-nt = sensor_data["p"].shape[0]
-
-d = sensor_data["p"].reshape(nt, Nx, Nz - z_start, order="F")
+Nt = sensor_data["p"].shape[0]
+d = sensor_data["p"].reshape(Nt, Nx, Ny, Nz - z_start, order="F")
 
 # %%
 plt.figure(figsize=(10, 8))
-plt.imshow(d[90].T, cmap="coolwarm")
+plt.imshow(d[190, :, Ny // 2, :].T, cmap="coolwarm")
 plt.colorbar(label="Pressure [Pa]")
 plt.title("Pressure Field in Tissue Layers")
 plt.xlabel("X position [grid points]")
@@ -213,30 +201,75 @@ plt.ylabel("Z position [grid points]")
 plt.show()
 
 # %%
-import matplotlib.animation as animation
-
-# Get global min/max for consistent colorbar
-vmin = d.min()
-vmax = d.max()
-
-# Create animation
-fig, ax = plt.subplots(figsize=(10, 8))
-im = ax.imshow(d[0].T, cmap="coolwarm", vmin=vmin, vmax=vmax)
-plt.colorbar(im, label="Pressure [Pa]")
-ax.set_xlabel("X position [grid points]")
-ax.set_ylabel("Z position [grid points]")
-
-
-def update(frame):
-    im.set_array(d[4 * frame].T)
-    ax.set_title(f"Pressure Field in Tissue Layers - Time step {2 * frame}")
-    return [im]
+# Save the simulation data to a numpy file
+np.savez(
+    "simulation_data.npz",
+    pressure_data=sensor_data["p"],
+    grid_params={
+        "Nx": Nx,
+        "Ny": Ny,
+        "Nz": Nz,
+        "dx": dx,
+        "dy": dy,
+        "dz": dz,
+        "z_start": z_start,
+    },
+    time_params={"dt": dt, "t_end": t_end, "Nt": Nt},
+)
+print("Simulation data saved to simulation_data.npz")
 
 
-anim = animation.FuncAnimation(fig, update, frames=nt // 4, interval=20, blit=True)
-anim.save("pressure_wave.mp4", writer="ffmpeg")
-plt.close()
+# # # %%
+# # d = sensor_data["p_max"].reshape(Nx, Nz - z_start, order="F")
 
-print("Video saved as pressure_wave.mp4")
+# # plt.figure(figsize=(10, 8))
+# # plt.imshow(d.T, cmap="coolwarm")
+# # plt.colorbar(label="Pressure [Pa]")
+# # plt.title("Pressure Field in Tissue Layers")
+# # plt.xlabel("X position [grid points]")
+# # plt.ylabel("Z position [grid points]")
+# # plt.show()
 
-# %%
+# # %%
+# sensor_data["p"].shape
+# nt = sensor_data["p"].shape[0]
+
+# d = sensor_data["p"].reshape(nt, Nx, Nz - z_start, order="F")
+
+# # %%
+# plt.figure(figsize=(10, 8))
+# plt.imshow(d[90].T, cmap="coolwarm")
+# plt.colorbar(label="Pressure [Pa]")
+# plt.title("Pressure Field in Tissue Layers")
+# plt.xlabel("X position [grid points]")
+# plt.ylabel("Z position [grid points]")
+# plt.show()
+
+# # %%
+# import matplotlib.animation as animation
+
+# # Get global min/max for consistent colorbar
+# vmin = d.min()
+# vmax = d.max()
+
+# # Create animation
+# fig, ax = plt.subplots(figsize=(10, 8))
+# im = ax.imshow(d[0].T, cmap="coolwarm", vmin=vmin, vmax=vmax)
+# plt.colorbar(im, label="Pressure [Pa]")
+# ax.set_xlabel("X position [grid points]")
+# ax.set_ylabel("Z position [grid points]")
+
+
+# def update(frame):
+#     im.set_array(d[4 * frame].T)
+#     ax.set_title(f"Pressure Field in Tissue Layers - Time step {2 * frame}")
+#     return [im]
+
+
+# anim = animation.FuncAnimation(fig, update, frames=nt // 4, interval=20, blit=True)
+# anim.save("pressure_wave.mp4", writer="ffmpeg")
+# plt.close()
+
+# print("Video saved as pressure_wave.mp4")
+
+# # %%
