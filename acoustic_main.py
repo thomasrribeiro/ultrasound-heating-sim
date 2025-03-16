@@ -8,7 +8,6 @@ from simulation_config import SimulationConfig
 from skull_pressure_simulator import SkullPressureSimulator
 from visualization import (
     plot_medium_properties,
-    plot_pressure_field,
     plot_intensity_field,
 )
 import matplotlib.pyplot as plt
