@@ -1,6 +1,9 @@
 # %% Imports
-%load_ext autoreload
-%autoreload 2
+try:
+    %load_ext autoreload
+    %autoreload 2
+except:
+    pass
 from simulation_config import SimulationConfig
 from skull_pressure_simulator import SkullPressureSimulator
 from visualization import (
@@ -71,3 +74,9 @@ fig, ax = plot_intensity_field(
 )
 plt.show()
 plt.close()
+
+#%%
+average_intensity.shape
+
+#%%
+np.save("average_intensity.npy", average_intensity)
