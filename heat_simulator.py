@@ -59,17 +59,17 @@ class BioheatSimulator:
     def setup_mesh(self):
         """Set up the computational grid."""
         # Create grid dimensions from config
-        self.nx = self.config.thermal.nx
-        self.ny = self.config.thermal.ny
-        self.nz = self.config.thermal.nz
-        self.dx = self.config.thermal.dx
-        self.dy = self.config.thermal.dy
-        self.dz = self.config.thermal.dz
+        self.nx = self.config.grid.Nx
+        self.ny = self.config.grid.Ny
+        self.nz = self.config.grid.Nz
+        self.dx = self.config.grid.dx
+        self.dy = self.config.grid.dy
+        self.dz = self.config.grid.dz
 
         # Calculate domain size
-        self.Lx = self.config.thermal.Lx
-        self.Ly = self.config.thermal.Ly
-        self.Lz = self.config.thermal.Lz
+        self.Lx = self.config.grid.Lx
+        self.Ly = self.config.grid.Ly
+        self.Lz = self.config.grid.Lz
 
         # Create coordinate meshgrid for visualization purposes
         self.x = np.linspace(0, self.Lx, self.nx)
@@ -91,10 +91,43 @@ class BioheatSimulator:
             self.X_torch, self.Y_torch, self.Z_torch, indexing="ij"
         )
 
-        # Generate the layer map from config
-        self.layer_map = self.config.generate_layer_map(self.device)
+        # Generate the tissue layer map for thermal domain
+        # This needs to be adjusted since we're working with a different z-dimension
+        self.generate_thermal_layer_map()
 
         return self.T
+
+    def generate_thermal_layer_map(self):
+        """
+        Generate a 3D tissue layer map tensor adjusted for the thermal domain.
+        """
+        # Initialize the layer map with all brain tissue (value 2)
+        self.layer_map = (
+            torch.ones(
+                (self.nx, self.ny, self.nz),
+                dtype=torch.long,
+                device=self.device,
+            )
+            * 2
+        )
+
+        # Convert tissue thicknesses to grid points
+        skin_thickness_points = int(self.config.skin.thickness / self.config.grid.dz)
+        skull_thickness_points = int(self.config.skull.thickness / self.config.grid.dz)
+
+        # For thermal simulation, tissue starts at z=0 (since we don't include water region)
+        skin_start = self.config.initial_tissue_z
+        skull_start = skin_start + skin_thickness_points
+        brain_start = skull_start + skull_thickness_points
+
+        # Assign skin (0) and skull (1) regions
+        if skin_thickness_points > 0:
+            self.layer_map[:, :, skin_start:skull_start] = 0  # Skin
+
+        if skull_thickness_points > 0:
+            self.layer_map[:, :, skull_start:brain_start] = 1  # Skull
+
+        return self.layer_map
 
     def setup_tissue_properties(self):
         """
@@ -196,21 +229,9 @@ class BioheatSimulator:
                 # Scale up by inverse of duty cycle to get instantaneous heating power
                 self.Q = self.Q / duty_cycle
         else:
-            # Create a simple Gaussian heat source centered in the domain
-            center_x = self.Lx / 2
-            center_y = self.Ly / 2
-            center_z = self.Lz / 2
-            sigma = self.config.thermal.source_sigma
-
-            self.Q = self.config.thermal.source_magnitude * torch.exp(
-                -(
-                    (self.X_t - center_x) ** 2
-                    + (self.Y_t - center_y) ** 2
-                    + (self.Z_t - center_z) ** 2
-                )
-                / sigma**2
+            raise RuntimeError(
+                "Intensity field not provided. Call setup_heat_source() with intensity_field first."
             )
-
         return self.Q
 
     def pad_3d_replicate(self, x, pad_width=1):
@@ -427,7 +448,6 @@ class BioheatSimulator:
         with h5py.File(filename, "w") as f:
             # Create groups
             temp_group = f.create_group("temperature_data")
-            grid_group = f.create_group("grid_params")
             time_group = f.create_group("time_params")
             source_group = f.create_group("source_params")
             tissues_group = f.create_group("tissue_properties")
@@ -455,10 +475,6 @@ class BioheatSimulator:
 
             # Save thermal config parameters using the to_dict method
             config_dict = self.config.to_dict()
-
-            # Save grid parameters
-            for key, value in config_dict["thermal"]["grid"].items():
-                grid_group.attrs[key] = value
 
             # Save time parameters
             for key, value in config_dict["thermal"]["time"].items():

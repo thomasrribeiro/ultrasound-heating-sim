@@ -29,26 +29,65 @@ class TissueProperties:
 
 
 @dataclass
+class GridConfig:
+    """Configuration parameters for the simulation grid, shared between acoustic and thermal."""
+
+    # Grid parameters
+    domain_size_x: int = 256  # Total domain size before PML subtraction
+    domain_size_y: int = 128
+    domain_size_z: int = 128
+
+    # PML parameters
+    pml_size: int = 10  # Size of the PML layer
+
+    # Derived parameters
+    dx: float = 208e-6  # 208 µm to match transducer pitch
+    dy: float = 208e-6
+    dz: float = 208e-6
+
+    @property
+    def Nx(self) -> int:
+        """Computational domain size in x direction (excluding PML)"""
+        return self.domain_size_x - 2 * self.pml_size
+
+    @property
+    def Ny(self) -> int:
+        """Computational domain size in y direction (excluding PML)"""
+        return self.domain_size_y - 2 * self.pml_size
+
+    @property
+    def Nz(self) -> int:
+        """Computational domain size in z direction (excluding PML)"""
+        return self.domain_size_z - 2 * self.pml_size
+
+    @property
+    def Lx(self) -> float:
+        """Domain size in x direction [m]"""
+        return self.Nx * self.dx
+
+    @property
+    def Ly(self) -> float:
+        """Domain size in y direction [m]"""
+        return self.Ny * self.dy
+
+    @property
+    def Lz(self) -> float:
+        """Domain size in z direction [m]"""
+        return self.Nz * self.dz
+
+
+@dataclass
 class AcousticConfig:
     """Configuration parameters for the acoustic simulation."""
 
     # Transducer parameters
     freq: float = 2e6  # 2 MHz frequency
     num_cycles: int = 3  # 3 cycle pulse
-    pitch: float = 208e-6  # 208 µm pitch
     num_elements_x: int = 140  # columns
     num_elements_y: int = 64  # rows
     source_magnitude: float = 1e6  # [Pa]
     pulse_repetition_freq: float = 2.7e3  # [Hz]
-
-    # Grid parameters
-    dx: float = field(init=False)  # spatial step [m]
-    dy: float = field(init=False)
-    dz: float = field(init=False)
-    pml_size: int = 10
-    Nx: int = 256 - 2 * 10  # using pml_size in default value doesn't work
-    Ny: int = 128 - 2 * 10
-    Nz: int = 128 - 2 * 10
+    pitch: float = 208e-6  # 208 µm pitch between transducer elements
 
     # Time parameters
     cfl: float = 0.3
@@ -62,25 +101,10 @@ class AcousticConfig:
     # Source and sensor positions
     source_z_pos: int = 10
 
-    def __post_init__(self):
-        # Initialize spatial steps based on pitch
-        self.dx = self.pitch
-        self.dy = self.pitch
-        self.dz = self.pitch
-
 
 @dataclass
 class ThermalConfig:
     """Configuration parameters for the thermal simulation."""
-
-    # Grid parameters
-    use_acoustic_grid: bool = False  # If True, use same grid as acoustic sim
-    nx: int = 30  # number of cells in x direction
-    ny: int = 30  # number of cells in y direction
-    nz: int = 30  # number of cells in z direction
-    dx: float = 0.001  # cell size in x direction [m]
-    dy: float = 0.001  # cell size in y direction [m]
-    dz: float = 0.001  # cell size in z direction [m]
 
     # Time stepping parameters
     dt: float = 0.01  # time step [s]
@@ -95,31 +119,6 @@ class ThermalConfig:
     blood_density: float = 1000  # [kg/m^3]
     blood_specific_heat: float = 3600  # [J/(kg·K)]
     arterial_temperature: float = 37.0  # [°C]
-
-    # Derived parameters
-    Lx: float = field(init=False)  # domain size [m]
-    Ly: float = field(init=False)
-    Lz: float = field(init=False)
-
-    def __post_init__(self):
-        # Compute domain size
-        self.Lx = self.nx * self.dx
-        self.Ly = self.ny * self.dy
-        self.Lz = self.nz * self.dz
-
-    def update_from_acoustic_grid(self, acoustic_config: AcousticConfig):
-        """Update thermal grid parameters to match acoustic grid."""
-        if self.use_acoustic_grid:
-            self.nx = acoustic_config.Nx
-            self.ny = acoustic_config.Ny
-            self.nz = acoustic_config.Nz
-            self.dx = acoustic_config.dx
-            self.dy = acoustic_config.dy
-            self.dz = acoustic_config.dz
-            # Update derived parameters
-            self.Lx = self.nx * self.dx
-            self.Ly = self.ny * self.dy
-            self.Lz = self.nz * self.dz
 
 
 @dataclass
@@ -156,16 +155,17 @@ class SimulationConfig:
         blood_perfusion_rate=0.008,  # [1/s]
     )
 
+    # Shared grid configuration
+    grid: GridConfig = field(default_factory=GridConfig)
+
     # Separate configurations
     acoustic: AcousticConfig = field(default_factory=AcousticConfig)
     thermal: ThermalConfig = field(default_factory=ThermalConfig)
 
+    # Position where tissue starts in the z-dimension (for acoustic sim)
     initial_tissue_z: int = 20
 
     def __post_init__(self):
-        # Update thermal grid if needed
-        self.thermal.update_from_acoustic_grid(self.acoustic)
-
         # Compute blood perfusion coefficient for thermal simulation (B = ρ_b·c_b·w_b)
         self.skin.B = (
             self.thermal.blood_density
@@ -197,7 +197,7 @@ class SimulationConfig:
         # Initialize the layer map with all brain tissue (value 2)
         layer_map = (
             torch.ones(
-                (self.thermal.nx, self.thermal.ny, self.thermal.nz),
+                (self.grid.Nx, self.grid.Ny, self.grid.Nz),
                 dtype=torch.long,
                 device=device,
             )
@@ -205,8 +205,8 @@ class SimulationConfig:
         )
 
         # Convert tissue thicknesses to grid points
-        skin_thickness_points = int(self.skin.thickness / self.thermal.dz)
-        skull_thickness_points = int(self.skull.thickness / self.thermal.dz)
+        skin_thickness_points = int(self.skin.thickness / self.grid.dz)
+        skull_thickness_points = int(self.skull.thickness / self.grid.dz)
 
         # Start positions for layers (assuming layers are along z direction)
         skin_start = 0  # Start at the top of the domain
@@ -226,6 +226,18 @@ class SimulationConfig:
         """Convert the config to a dictionary for saving."""
         return {
             "initial_tissue_z": self.initial_tissue_z,
+            "grid": {
+                "domain_size_x": self.grid.domain_size_x,
+                "domain_size_y": self.grid.domain_size_y,
+                "domain_size_z": self.grid.domain_size_z,
+                "pml_size": self.grid.pml_size,
+                "Nx": self.grid.Nx,
+                "Ny": self.grid.Ny,
+                "Nz": self.grid.Nz,
+                "dx": self.grid.dx,
+                "dy": self.grid.dy,
+                "dz": self.grid.dz,
+            },
             "acoustic": {
                 "transducer": {
                     "frequency": self.acoustic.freq,
@@ -235,15 +247,6 @@ class SimulationConfig:
                     "num_elements_y": self.acoustic.num_elements_y,
                     "source_magnitude": self.acoustic.source_magnitude,
                     "pulse_repetition_freq": self.acoustic.pulse_repetition_freq,
-                },
-                "grid": {
-                    "dx": self.acoustic.dx,
-                    "dy": self.acoustic.dy,
-                    "dz": self.acoustic.dz,
-                    "Nx": self.acoustic.Nx,
-                    "Ny": self.acoustic.Ny,
-                    "Nz": self.acoustic.Nz,
-                    "pml_size": self.acoustic.pml_size,
                 },
                 "time": {
                     "cfl": self.acoustic.cfl,
@@ -259,14 +262,6 @@ class SimulationConfig:
                 },
             },
             "thermal": {
-                "grid": {
-                    "nx": self.thermal.nx,
-                    "ny": self.thermal.ny,
-                    "nz": self.thermal.nz,
-                    "dx": self.thermal.dx,
-                    "dy": self.thermal.dy,
-                    "dz": self.thermal.dz,
-                },
                 "time": {
                     "dt": self.thermal.dt,
                     "steps": self.thermal.steps,

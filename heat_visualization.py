@@ -59,12 +59,12 @@ def plot_temperature_field_slices(
 
     # Get grid parameters from config
     nx, ny, nz = T_np.shape
-    dx = config.thermal.dx
-    dy = config.thermal.dy
-    dz = config.thermal.dz
-    Lx = config.thermal.Lx
-    Ly = config.thermal.Ly
-    Lz = config.thermal.Lz
+    dx = config.grid.dx
+    dy = config.grid.dy
+    dz = config.grid.dz
+    Lx = config.grid.Lx
+    Ly = config.grid.Ly
+    Lz = config.grid.Lz
 
     # Default to mid-plane indices if not provided
     if slice_indices is None:
@@ -163,12 +163,12 @@ def plot_tissue_properties(
 
     # Get grid parameters from config
     nx, ny, nz = prop_np.shape
-    dx = config.thermal.dx
-    dy = config.thermal.dy
-    dz = config.thermal.dz
-    Lx = config.thermal.Lx
-    Ly = config.thermal.Ly
-    Lz = config.thermal.Lz
+    dx = config.grid.dx
+    dy = config.grid.dy
+    dz = config.grid.dz
+    Lx = config.grid.Lx
+    Ly = config.grid.Ly
+    Lz = config.grid.Lz
 
     # Default to mid-plane indices if not provided
     if slice_indices is None:
@@ -254,14 +254,14 @@ def plot_temperature_profile(
 
     # Get grid parameters from config
     nx, ny, nz = T_np.shape
-    dx = config.thermal.dx
-    dy = config.thermal.dy
-    dz = config.thermal.dz
+    dx = config.grid.dx
+    dy = config.grid.dy
+    dz = config.grid.dz
 
     # Create coordinate arrays
-    x = np.linspace(0, config.thermal.Lx, nx)
-    y = np.linspace(0, config.thermal.Ly, ny)
-    z = np.linspace(0, config.thermal.Lz, nz)
+    x = np.linspace(0, config.grid.Lx, nx)
+    y = np.linspace(0, config.grid.Ly, ny)
+    z = np.linspace(0, config.grid.Lz, nz)
 
     # Default to center position if not provided
     if position is None:
@@ -336,12 +336,12 @@ def visualize_combined_results(
 
     # Get grid parameters
     nx, ny, nz = T_np.shape
-    dx = config.thermal.dx
-    dy = config.thermal.dy
-    dz = config.thermal.dz
-    Lx = config.thermal.Lx
-    Ly = config.thermal.Ly
-    Lz = config.thermal.Lz
+    dx = config.grid.dx
+    dy = config.grid.dy
+    dz = config.grid.dz
+    Lx = config.grid.Lx
+    Ly = config.grid.Ly
+    Lz = config.grid.Lz
 
     # Default to mid-plane indices if not provided
     if slice_indices is None:

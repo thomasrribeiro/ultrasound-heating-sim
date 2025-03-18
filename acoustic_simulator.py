@@ -26,8 +26,8 @@ class SkullPressureSimulator:
     def setup_grid(self) -> kWaveGrid:
         """Create and configure the k-Wave grid."""
         self.kgrid = kWaveGrid(
-            [self.config.acoustic.Nx, self.config.acoustic.Ny, self.config.acoustic.Nz],
-            [self.config.acoustic.dx, self.config.acoustic.dy, self.config.acoustic.dz],
+            [self.config.grid.Nx, self.config.grid.Ny, self.config.grid.Nz],
+            [self.config.grid.dx, self.config.grid.dy, self.config.grid.dz],
         )
 
         # Calculate time step
@@ -51,8 +51,8 @@ class SkullPressureSimulator:
         )
 
         # Convert thicknesses to grid points
-        skin_points = round(self.config.skin.thickness / self.config.acoustic.dx)
-        skull_points = round(self.config.skull.thickness / self.config.acoustic.dx)
+        skin_points = round(self.config.skin.thickness / self.config.grid.dx)
+        skull_points = round(self.config.skull.thickness / self.config.grid.dx)
         z_start = self.config.initial_tissue_z
 
         # Add skin layer
@@ -89,13 +89,13 @@ class SkullPressureSimulator:
 
         # Define source mask for plane wave
         source_x_size = self.config.acoustic.num_elements_x * (
-            self.config.acoustic.pitch / self.config.acoustic.dx
+            self.config.acoustic.pitch / self.config.grid.dx
         )
         source_y_size = self.config.acoustic.num_elements_y * (
-            self.config.acoustic.pitch / self.config.acoustic.dy
+            self.config.acoustic.pitch / self.config.grid.dy
         )
-        x_start = round((self.config.acoustic.Nx - source_x_size) / 2)
-        y_start = round((self.config.acoustic.Ny - source_y_size) / 2)
+        x_start = round((self.config.grid.Nx - source_x_size) / 2)
+        y_start = round((self.config.grid.Ny - source_y_size) / 2)
 
         source_mask = np.zeros(self.kgrid.k.shape)
         source_mask[
@@ -110,8 +110,7 @@ class SkullPressureSimulator:
         self.source.p = source_signal
 
         # Create sensor mask and sensor
-        sensor_mask = np.zeros(self.kgrid.k.shape)
-        sensor_mask[:, :, self.config.initial_tissue_z :] = 1
+        sensor_mask = np.ones(self.kgrid.k.shape)
         self.sensor = kSensor(sensor_mask, record=["p"])
 
         return self.source, self.sensor
@@ -126,7 +125,7 @@ class SkullPressureSimulator:
         # Set simulation options
         simulation_options = SimulationOptions(
             pml_inside=False,
-            pml_size=self.config.acoustic.pml_size,
+            pml_size=self.config.grid.pml_size,
             data_cast="single",
             save_to_disk=True,
             data_recast=True,
@@ -163,15 +162,8 @@ class SkullPressureSimulator:
 
         avg_pressure_squared = np.mean(pressure_data**2, axis=0)
 
-        density = self.medium.density[
-            :, :, self.config.initial_tissue_z :
-        ]  # only consider tissue
-        sound_speed = self.medium.sound_speed[
-            :, :, self.config.initial_tissue_z :
-        ]  # only consider tissue
-
         # Get local acoustic impedance (ρc)
-        impedance = density * sound_speed
+        impedance = self.medium.density * self.medium.sound_speed
 
         # Compute instantaneous intensity I = p²/(2ρc)
         average_intensity_over_simulation = avg_pressure_squared / (2 * impedance)
