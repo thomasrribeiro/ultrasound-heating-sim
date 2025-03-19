@@ -41,36 +41,30 @@ class SkullPressureSimulator:
         if self.kgrid is None:
             raise RuntimeError("Grid must be set up before medium")
 
-        # Initialize medium with brain properties
+        # Initialize medium with default properties
         self.medium = kWaveMedium(
-            sound_speed=self.config.brain.sound_speed * np.ones(self.kgrid.k.shape),
-            density=self.config.brain.density * np.ones(self.kgrid.k.shape),
+            sound_speed=np.zeros(self.kgrid.k.shape),
+            density=np.zeros(self.kgrid.k.shape),
             alpha_coeff=self.config.acoustic.alpha_coeff,
             alpha_power=self.config.acoustic.alpha_power,
             BonA=self.config.acoustic.BonA,
         )
 
-        # Convert thicknesses to grid points
-        skin_points = round(self.config.skin.thickness / self.config.grid.dx)
-        skull_points = round(self.config.skull.thickness / self.config.grid.dx)
-        z_start = self.config.initial_tissue_z
+        # Get layer map from config
+        layer_map = self.config.layer_map
 
-        # Add skin layer
-        self.medium.sound_speed[:, :, z_start : z_start + skin_points] = (
-            self.config.skin.sound_speed
-        )
-        self.medium.density[:, :, z_start : z_start + skin_points] = (
-            self.config.skin.density
-        )
+        # Set properties based on layer map
+        # Skin (0)
+        self.medium.sound_speed[layer_map == 0] = self.config.skin.sound_speed
+        self.medium.density[layer_map == 0] = self.config.skin.density
 
-        # Add skull layer
-        skull_start = z_start + skin_points
-        self.medium.sound_speed[:, :, skull_start : skull_start + skull_points] = (
-            self.config.skull.sound_speed
-        )
-        self.medium.density[:, :, skull_start : skull_start + skull_points] = (
-            self.config.skull.density
-        )
+        # Skull (1)
+        self.medium.sound_speed[layer_map == 1] = self.config.skull.sound_speed
+        self.medium.density[layer_map == 1] = self.config.skull.density
+
+        # Brain (2)
+        self.medium.sound_speed[layer_map == 2] = self.config.brain.sound_speed
+        self.medium.density[layer_map == 2] = self.config.brain.density
 
         return self.medium
 

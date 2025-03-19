@@ -183,25 +183,19 @@ class SimulationConfig:
             * self.brain.blood_perfusion_rate
         )
 
-    def generate_layer_map(self, device):
+    @property
+    def layer_map(self):
         """
         Generate a 3D tissue layer map tensor based on configured tissue thicknesses.
-
-        Args:
-            device: The torch device to create the tensor on
 
         Returns:
             A tensor with integer values representing tissue types:
             0 = skin, 1 = skull, 2 = brain
         """
         # Initialize the layer map with all brain tissue (value 2)
-        layer_map = (
-            torch.ones(
-                (self.grid.Nx, self.grid.Ny, self.grid.Nz),
-                dtype=torch.long,
-                device=device,
-            )
-            * 2
+        layer_map = 2 * np.ones(
+            (self.grid.Nx, self.grid.Ny, self.grid.Nz),
+            dtype=np.long,
         )
 
         # Convert tissue thicknesses to grid points
@@ -209,7 +203,7 @@ class SimulationConfig:
         skull_thickness_points = int(self.skull.thickness / self.grid.dz)
 
         # Start positions for layers (assuming layers are along z direction)
-        skin_start = 0  # Start at the top of the domain
+        skin_start = self.initial_tissue_z
         skull_start = skin_start + skin_thickness_points
         brain_start = skull_start + skull_thickness_points
 

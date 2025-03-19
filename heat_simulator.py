@@ -91,43 +91,9 @@ class BioheatSimulator:
             self.X_torch, self.Y_torch, self.Z_torch, indexing="ij"
         )
 
-        # Generate the tissue layer map for thermal domain
-        # This needs to be adjusted since we're working with a different z-dimension
-        self.generate_thermal_layer_map()
+        self.layer_map = torch.from_numpy(self.config.layer_map).to(self.device)
 
         return self.T
-
-    def generate_thermal_layer_map(self):
-        """
-        Generate a 3D tissue layer map tensor adjusted for the thermal domain.
-        """
-        # Initialize the layer map with all brain tissue (value 2)
-        self.layer_map = (
-            torch.ones(
-                (self.nx, self.ny, self.nz),
-                dtype=torch.long,
-                device=self.device,
-            )
-            * 2
-        )
-
-        # Convert tissue thicknesses to grid points
-        skin_thickness_points = int(self.config.skin.thickness / self.config.grid.dz)
-        skull_thickness_points = int(self.config.skull.thickness / self.config.grid.dz)
-
-        # For thermal simulation, tissue starts at z=0 (since we don't include water region)
-        skin_start = self.config.initial_tissue_z
-        skull_start = skin_start + skin_thickness_points
-        brain_start = skull_start + skull_thickness_points
-
-        # Assign skin (0) and skull (1) regions
-        if skin_thickness_points > 0:
-            self.layer_map[:, :, skin_start:skull_start] = 0  # Skin
-
-        if skull_thickness_points > 0:
-            self.layer_map[:, :, skull_start:brain_start] = 1  # Skull
-
-        return self.layer_map
 
     def setup_tissue_properties(self):
         """
