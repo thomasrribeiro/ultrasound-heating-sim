@@ -24,8 +24,8 @@ def plot_medium_properties(
 
     # Add layer annotations
     z_start = config.initial_tissue_z
-    skin_points = round(config.skin.thickness / config.grid.dx)
-    skull_points = round(config.skull.thickness / config.grid.dx)
+    skin_points = int(config.skin.thickness / config.grid.dz)
+    skull_points = int(config.skull.thickness / config.grid.dz)
 
     # Add horizontal lines for layer boundaries
     ax.axhline(y=z_start, color="w", linestyle="--", alpha=0.5)
