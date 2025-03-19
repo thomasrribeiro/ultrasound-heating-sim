@@ -177,16 +177,6 @@ class BioheatSimulator:
                 )
 
             self.Q = 2 * self.absorption * intensity_field
-
-            # Apply a scaling factor based on the pulse repetition frequency
-            # (since acoustic intensity is often time-averaged but we need instantaneous power)
-            duty_cycle = self.config.acoustic.num_cycles / (
-                self.config.acoustic.freq
-                * (1.0 / self.config.acoustic.pulse_repetition_freq)
-            )
-            if duty_cycle > 0 and duty_cycle < 1:
-                # Scale up by inverse of duty cycle to get instantaneous heating power
-                self.Q = self.Q / duty_cycle
         else:
             raise RuntimeError(
                 "Intensity field not provided. Call setup_heat_source() with intensity_field first."
