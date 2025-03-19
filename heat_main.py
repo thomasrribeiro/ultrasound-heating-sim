@@ -16,6 +16,7 @@ from heat_visualization import (
     plot_temperature_field_slices,
     plot_tissue_properties,
     visualize_combined_results,
+    make_temperature_video,
 )
 
 intensity_file = "data/average_intensity.npy"
@@ -59,7 +60,7 @@ print("Visualizing tissue layer map...")
 layer_map = simulator.get_layer_map()
 plt.figure(figsize=(10, 5))
 plt.imshow(
-    layer_map[:, layer_map.shape[1] // 2, :].cpu().numpy(),
+    layer_map[:, layer_map.shape[1] // 2, :].cpu().numpy().T,
     origin="lower",
     cmap="viridis",
 )
@@ -82,7 +83,7 @@ simulator.setup_heat_source(intensity_field=intensity_tensor)
 
 # Run simulation
 print("Running bioheat simulation...")
-T, times, max_temps = simulator.run_simulation()
+T_history, times, max_temps = simulator.run_simulation()
 
 # %% Visualize results
 print("Plotting results...")
@@ -92,19 +93,31 @@ plt.savefig("data/temperature_evolution.png")
 plt.close(fig)
 
 # Temperature distribution
-fig, _ = plot_temperature_field_slices(T, config)
+fig, _ = plot_temperature_field_slices(T_history[-1], config)
 plt.savefig("data/temperature_distribution.png")
 plt.close(fig)
 
 # Combined acoustic intensity and temperature visualization
-fig, _ = visualize_combined_results(intensity_tensor, T, config)
+fig, _ = visualize_combined_results(intensity_tensor, T_history[-1], config)
 plt.savefig("data/acoustic_thermal_combined.png")
 plt.close(fig)
 
 # Save results
-print("Saving results to HDF5...")
-simulator.save_results("data/bioheat_results.h5")
+# print("Saving results to HDF5...")
+# simulator.save_results(
+#     "data/bioheat_results.h5", T_history[-1], times, max_temps, T_history
+# )
 
+# %%
+
+# Create temperature evolution video using the full history
+print("Creating temperature evolution video...")
+make_temperature_video(
+    T_history[::5], config, times[::5], "data/temperature_evolution.mp4"
+)
+
+print(f"Temperature history shape: {T_history.shape}")
+print(f"Number of time points: {len(times)}")
 print("Simulation complete!")
 
 # %%
