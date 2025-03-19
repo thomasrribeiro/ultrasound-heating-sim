@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 from typing import Tuple, Optional
 import torch
 from config import SimulationConfig
@@ -443,3 +444,113 @@ def visualize_combined_results(
     plt.subplots_adjust(top=0.92)
 
     return fig, axes
+
+
+def make_temperature_video(
+    temperature_field: torch.Tensor,
+    config: SimulationConfig,
+    times: list,
+    filename: str = "temperature_evolution.mp4",
+    fps: int = 10,
+):
+    """Make a video of the temperature field evolution.
+
+    Args:
+        temperature_field: 4D temperature field tensor (Nt, Nx, Ny, Nz) or 3D tensor (Nx, Ny, Nz)
+        config: Simulation configuration
+        times: List of time points
+        filename: Output filename
+        fps: Frames per second for the video
+    """
+    # Convert to numpy if tensor
+    if isinstance(temperature_field, torch.Tensor):
+        T_np = temperature_field.cpu().numpy()
+    else:
+        T_np = temperature_field
+
+    T_rise = T_np - config.thermal.arterial_temperature
+
+    # Create figure with 3 subplots for different views
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    # Get mid-slice indices
+    mid_x = T_np.shape[1] // 2
+    mid_y = T_np.shape[2] // 2
+    mid_z = T_np.shape[3] // 2
+
+    # Get global min/max for consistent colorbar
+    vmin = T_rise.min()
+    vmax = T_rise.max()
+
+    # Set up initial plots
+    # XY plane
+    im1 = axes[0].imshow(
+        T_rise[0, :, :, mid_z].T,
+        origin="lower",
+        extent=[0, config.grid.Lx, 0, config.grid.Ly],
+        cmap="hot",
+        vmin=vmin,
+        vmax=vmax,
+    )
+    axes[0].set_title(f"XY Plane (Z={mid_z*config.grid.dz*1000:.1f}mm)")
+    axes[0].set_xlabel("X [m]")
+    axes[0].set_ylabel("Y [m]")
+    plt.colorbar(im1, ax=axes[0], label="Temperature Rise [°C]")
+
+    # XZ plane
+    im2 = axes[1].imshow(
+        T_rise[0, :, mid_y, :].T,
+        origin="lower",
+        extent=[0, config.grid.Lx, 0, config.grid.Lz],
+        cmap="hot",
+        vmin=vmin,
+        vmax=vmax,
+    )
+    axes[1].set_title(f"XZ Plane (Y={mid_y*config.grid.dy*1000:.1f}mm)")
+    axes[1].set_xlabel("X [m]")
+    axes[1].set_ylabel("Z [m]")
+    plt.colorbar(im2, ax=axes[1], label="Temperature Rise [°C]")
+
+    # YZ plane
+    im3 = axes[2].imshow(
+        T_rise[0, mid_x, :, :].T,
+        origin="lower",
+        extent=[0, config.grid.Ly, 0, config.grid.Lz],
+        cmap="hot",
+        vmin=vmin,
+        vmax=vmax,
+    )
+    axes[2].set_title(f"YZ Plane (X={mid_x*config.grid.dx*1000:.1f}mm)")
+    axes[2].set_xlabel("Y [m]")
+    axes[2].set_ylabel("Z [m]")
+    plt.colorbar(im3, ax=axes[2], label="Temperature Rise [°C]")
+
+    # Add overall title
+    fig.suptitle("Temperature Distribution", fontsize=16)
+    plt.tight_layout()
+
+    def update(frame):
+        # Update data for each subplot
+        im1.set_array(T_rise[frame, :, :, mid_z].T)
+        im2.set_array(T_rise[frame, :, mid_y, :].T)
+        im3.set_array(T_rise[frame, mid_x, :, :].T)
+
+        # Update title with current time
+        fig.suptitle(
+            f"Temperature Distribution at t = {times[frame]:.2f}s", fontsize=16
+        )
+        return [im1, im2, im3]
+
+    # Create animation
+    anim = animation.FuncAnimation(
+        fig, update, frames=len(times), interval=1000 / fps, blit=True
+    )
+
+    # Set up the writer with proper settings
+    Writer = animation.writers["ffmpeg"]
+    writer = Writer(fps=fps, metadata=dict(artist="Me"), bitrate=1800)
+
+    # Save animation
+    anim.save(filename, writer=writer)
+    plt.close()
+    print(f"Video saved as {filename}")

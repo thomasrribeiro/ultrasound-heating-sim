@@ -35,7 +35,6 @@ class BioheatSimulator:
         print(f"BioheatSimulator using device: {self.device}")
 
         # Initialize simulation data
-        self.T = None  # Temperature field
         self.rho = None  # Tissue density field
         self.c = None  # Specific heat capacity field
         self.k = None  # Thermal conductivity field
@@ -49,15 +48,15 @@ class BioheatSimulator:
         self.Kt = None  # k
         self.B = None  # w_b·ρ_b·c_b
 
-        # Output data
-        self.history_times = []
-        self.history_max_temp = []
-
         # Layer map
         self.layer_map = None
 
     def setup_mesh(self):
-        """Set up the computational grid."""
+        """Set up the computational grid.
+
+        Returns:
+            Initial temperature field tensor
+        """
         # Create grid dimensions from config
         self.nx = self.config.grid.Nx
         self.ny = self.config.grid.Ny
@@ -78,10 +77,6 @@ class BioheatSimulator:
         self.X, self.Y, self.Z = np.meshgrid(self.x, self.y, self.z, indexing="ij")
 
         # Initialize temperature field with arterial temperature
-        self.T = (
-            torch.ones((self.nx, self.ny, self.nz), device=self.device)
-            * self.config.thermal.arterial_temperature
-        )
 
         # Create coordinate meshgrid on GPU for heat source calculation
         self.X_torch = torch.linspace(0, self.Lx, self.nx, device=self.device)
@@ -92,8 +87,6 @@ class BioheatSimulator:
         )
 
         self.layer_map = torch.from_numpy(self.config.layer_map).to(self.device)
-
-        return self.T
 
     def setup_tissue_properties(self):
         """
@@ -335,43 +328,58 @@ class BioheatSimulator:
         return T_new
 
     def run_simulation(self):
-        """Run the bioheat simulation."""
+        """Run the bioheat simulation.
+
+        Returns:
+            Tuple containing:
+            - Final temperature field tensor (Nx, Ny, Nz)
+            - List of simulation times
+            - List of maximum temperatures
+            - Temperature history tensor (Nt, Nx, Ny, Nz)
+        """
         # Check if setup has been completed
-        if (
-            self.T is None
-            or self.A is None
-            or self.Kt is None
-            or self.B is None
-            or self.Q is None
-        ):
+        if self.A is None or self.Kt is None or self.B is None or self.Q is None:
             raise RuntimeError(
                 "Simulation setup is incomplete. Call setup_mesh(), setup_tissue_properties(), and setup_heat_source() first."
             )
 
         # Get time stepping parameters from config
         dt = self.config.thermal.dt
-        steps = self.config.thermal.steps
+        t_end = self.config.thermal.t_end
         save_every = self.config.thermal.save_every
+
+        # Calculate number of steps
+        steps = int(t_end / dt)
 
         # Initialize time and history arrays
         start_time = time.time()
         t = 0.0
-        self.history_times = []
-        self.history_max_temp = []
+        times = []
+        max_temps = []
+        T_history = []  # Store temperature field history
+
+        # Initialize temperature field
+        T = (
+            torch.ones((self.nx, self.ny, self.nz), device=self.device)
+            * self.config.thermal.arterial_temperature
+        )
 
         # Time stepping loop
         for step in range(steps):
             t += dt
 
             # Update temperature
-            self.T = self.solve_bioheat_step(self.T, dt)
+            T = self.solve_bioheat_step(T, dt)
 
             # Save and output statistics
             if step % save_every == 0 or step == steps - 1:
                 # Get max temperature
-                max_temp = float(torch.max(self.T).cpu().numpy())
-                self.history_times.append(t)
-                self.history_max_temp.append(max_temp)
+                max_temp = float(torch.max(T).cpu().numpy())
+                times.append(t)
+                max_temps.append(max_temp)
+                T_history.append(
+                    T.clone()
+                )  # Store a copy of the current temperature field
 
                 print(
                     f"Step {step}/{steps}, Time: {t:.3f}s, Max temp: {max_temp:.6f}°C"
@@ -383,13 +391,10 @@ class BioheatSimulator:
             f"Simulation completed in {elapsed:.2f} seconds ({steps/elapsed:.1f} steps/second)"
         )
 
-        return self.T, self.history_times, self.history_max_temp
+        # Stack temperature history into a single tensor
+        T_history = torch.stack(T_history)
 
-    def get_temperature_field(self):
-        """Get the current temperature field."""
-        if self.T is None:
-            raise RuntimeError("Temperature field not initialized")
-        return self.T
+        return T_history, times, max_temps
 
     def get_layer_map(self):
         """Get the tissue layer map."""
@@ -403,13 +408,25 @@ class BioheatSimulator:
             raise RuntimeError("Absorption field not initialized")
         return self.absorption
 
-    def save_results(self, filename: str) -> None:
-        """Save simulation results and configuration to HDF5 file."""
-        if self.T is None:
-            raise RuntimeError("No simulation data to save")
+    def save_results(
+        self,
+        filename: str,
+        T: torch.Tensor,
+        times: list,
+        max_temps: list,
+        T_history: torch.Tensor,
+    ) -> None:
+        """Save simulation results and configuration to HDF5 file.
 
+        Args:
+            filename: Path to save the HDF5 file
+            T: Final temperature field tensor (Nx, Ny, Nz)
+            times: List of simulation times
+            max_temps: List of maximum temperatures
+            T_history: Temperature history tensor (Nt, Nx, Ny, Nz)
+        """
         # Transfer temperature field to CPU
-        T_np = self.T.cpu().numpy()
+        T_np = T.cpu().numpy()
 
         with h5py.File(filename, "w") as f:
             # Create groups
@@ -420,12 +437,9 @@ class BioheatSimulator:
 
             # Save temperature data
             temp_group.create_dataset("T", data=T_np)
-            temp_group.create_dataset(
-                "history_times", data=np.array(self.history_times)
-            )
-            temp_group.create_dataset(
-                "history_max_temp", data=np.array(self.history_max_temp)
-            )
+            temp_group.create_dataset("history_times", data=np.array(times))
+            temp_group.create_dataset("history_max_temp", data=np.array(max_temps))
+            temp_group.create_dataset("T_history", data=T_history.cpu().numpy())
 
             # Save layer map if available
             if self.layer_map is not None:
