@@ -156,7 +156,7 @@ class BioheatSimulator:
             * self.w_b
         )  # [W/(m³·K)]
 
-        return self.rho, self.c, self.k, self.w_b
+        return
 
     def setup_heat_source(self, intensity_field: Optional[torch.Tensor] = None):
         """
@@ -346,7 +346,10 @@ class BioheatSimulator:
         t = 0.0
         times = []
         max_temps = []
-        T_history = []  # Store temperature field history
+        # Calculate number of history points to save
+        n_history = len(range(0, steps, save_every)) + 1  # +1 for final step
+        T_history = np.zeros((n_history, self.nx, self.ny, self.nz))
+        history_idx = 0
 
         # Initialize temperature field
         T = (
@@ -367,9 +370,8 @@ class BioheatSimulator:
                 max_temp = float(torch.max(T).cpu().numpy())
                 times.append(t)
                 max_temps.append(max_temp)
-                T_history.append(
-                    T.clone()
-                )  # Store a copy of the current temperature field
+                T_history[history_idx] = T.cpu().numpy()  # Store temperature field
+                history_idx += 1
 
                 print(
                     f"Step {step}/{steps}, Time: {t:.3f}s, Max temp: {max_temp:.6f}°C"
@@ -380,9 +382,6 @@ class BioheatSimulator:
         print(
             f"Simulation completed in {elapsed:.2f} seconds ({steps/elapsed:.1f} steps/second)"
         )
-
-        # Stack temperature history into a single tensor
-        T_history = torch.stack(T_history)
 
         return T_history, times, max_temps
 

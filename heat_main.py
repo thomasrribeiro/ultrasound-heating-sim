@@ -3,6 +3,14 @@
 Main script for bioheat equation simulation using acoustic intensity data.
 """
 
+try:
+    import IPython
+
+    IPython.get_ipython().run_line_magic("load_ext", "autoreload")
+    IPython.get_ipython().run_line_magic("autoreload", "2")
+except:
+    pass
+
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
