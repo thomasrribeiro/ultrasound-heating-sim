@@ -88,7 +88,7 @@ class AcousticConfig:
     num_cycles: int = 3  # 3 cycle pulse
     num_elements_x: int = 140  # columns
     num_elements_y: int = 64  # rows
-    source_magnitude: float = 1e6  # [Pa]
+    source_magnitude: float = 0.6e6  # [Pa]
     pulse_repetition_freq: float = 2.7e3  # [Hz]
     pitch: float = 208e-6  # 208 µm pitch between transducer elements
 
@@ -99,7 +99,6 @@ class AcousticConfig:
     # Medium properties
     alpha_coeff: float = 0.75
     alpha_power: float = 1.5
-    BonA: float = 6
 
     # Source and sensor positions
     source_z_pos: int = 10

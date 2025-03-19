@@ -47,7 +47,6 @@ class SkullPressureSimulator:
             density=np.zeros(self.kgrid.k.shape),
             alpha_coeff=self.config.acoustic.alpha_coeff,
             alpha_power=self.config.acoustic.alpha_power,
-            BonA=self.config.acoustic.BonA,
         )
 
         # Get layer map from config
