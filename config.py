@@ -9,20 +9,23 @@ class TissueProperties:
     # Acoustic properties
     sound_speed: float  # [m/s]
     density: float  # [kg/m^3]
-    thickness: float = 0.0  # [m]
-    absorption_coefficient_db_cm: float = 1.0  # acoustic absorption coefficient [dB/cm]
+    absorption_coefficient: float  # acoustic absorption coefficient [Np/m]
 
     # Thermal properties
-    specific_heat: float = 3700  # specific heat capacity of tissue [J/(kg·K)]
-    thermal_conductivity: float = 0.5  # thermal conductivity [W/(m·K)]
-    blood_perfusion_rate: float = 0.0005  # blood perfusion rate [1/s]
+    specific_heat: float  # specific heat capacity of tissue [J/(kg·K)]
+    thermal_conductivity: float  # thermal conductivity [W/(m·K)]
+    heat_transfer_rate: float  # heat transfer rate [ml/min/kg]
+
+    thickness: float | None = None  # [m]
+
+    @property
+    def blood_perfusion_rate(self) -> float:
+        """Blood perfusion rate [1/s]"""
+        MIN_TO_SEC = 60
+        ML_TO_M3 = 1e-6
+        return self.heat_transfer_rate * self.density * ML_TO_M3 / MIN_TO_SEC
 
     def __post_init__(self):
-        # Convert absorption coefficient from dB/cm to Np/m
-        self.absorption_coefficient = (
-            self.absorption_coefficient_db_cm * 0.1151
-        )  # [Np/m]
-
         # Derived thermal parameters
         self.A = self.density * self.specific_heat  # [J/(m³·K)]
         self.Kt = self.thermal_conductivity  # [W/(m·K)]
@@ -41,9 +44,9 @@ class GridConfig:
     pml_size: int = 10  # Size of the PML layer
 
     # Derived parameters
-    dx: float = 208e-6  # 208 µm to match transducer pitch
-    dy: float = 208e-6
-    dz: float = 208e-6
+    dx: float = 208e-6  # [m] 208 µm to match transducer pitch
+    dy: float = 208e-6  # [m]
+    dz: float = 208e-6  # [m]
 
     @property
     def Nx(self) -> int:
@@ -108,16 +111,12 @@ class ThermalConfig:
 
     # Time stepping parameters
     dt: float = 0.01  # time step [s]
-    steps: int = 500  # number of time steps
+    t_end: float = 100.0  # end time [s]
     save_every: int = 50  # save visualization every N steps
 
-    # Heat source parameters (will be overridden by acoustic intensity)
-    source_magnitude: float = 1e4  # heat source magnitude [W/m^3]
-    source_sigma: float = 0.001  # width of Gaussian heat source [m]
-
     # Blood properties
-    blood_density: float = 1000  # [kg/m^3]
-    blood_specific_heat: float = 3600  # [J/(kg·K)]
+    blood_density: float = 1050  # [kg/m^3]
+    blood_specific_heat: float = 3617  # [J/(kg·K)]
     arterial_temperature: float = 37.0  # [°C]
 
 
@@ -127,32 +126,32 @@ class SimulationConfig:
 
     # Tissue layers
     skin: TissueProperties = TissueProperties(
-        sound_speed=1610,  # [m/s]
-        density=1090,  # [kg/m^3]
+        sound_speed=1624,  # [m/s]
+        density=1109,  # [kg/m^3]
         thickness=2e-3,  # 2 mm
-        absorption_coefficient_db_cm=1.5,  # [dB/cm] at 2 MHz
-        specific_heat=3500,  # [J/(kg·K)]
-        thermal_conductivity=0.42,  # [W/(m·K)]
-        blood_perfusion_rate=0.002,  # [1/s]
+        absorption_coefficient=42.3,  # [Np/m] at 2 MHz
+        specific_heat=3391,  # [J/(kg·K)]
+        thermal_conductivity=0.37,  # [W/(m·K)]
+        heat_transfer_rate=106,  # [ml/min/kg]
     )
 
     skull: TissueProperties = TissueProperties(
-        sound_speed=3200,  # [m/s]
-        density=1900,  # [kg/m^3]
+        sound_speed=2770,  # [m/s]
+        density=1908,  # [kg/m^3]
         thickness=7e-3,  # 7 mm
-        absorption_coefficient_db_cm=7.0,  # [dB/cm] at 2 MHz
-        specific_heat=1300,  # [J/(kg·K)]
+        absorption_coefficient=109.1,  # [Np/m] at 2 MHz
+        specific_heat=1313,  # [J/(kg·K)]
         thermal_conductivity=0.32,  # [W/(m·K)]
-        blood_perfusion_rate=0.0003,  # [1/s]
+        heat_transfer_rate=10,  # [ml/min/kg]
     )
 
     brain: TissueProperties = TissueProperties(
-        sound_speed=1560,  # [m/s]
-        density=1040,  # [kg/m^3]
-        absorption_coefficient_db_cm=1.0,  # [dB/cm] at 2 MHz
-        specific_heat=3600,  # [J/(kg·K)]
+        sound_speed=1546,  # [m/s]
+        density=1046,  # [kg/m^3]
+        absorption_coefficient=16.75,  # [Np/m] at 2 MHz
+        specific_heat=3630,  # [J/(kg·K)]
         thermal_conductivity=0.51,  # [W/(m·K)]
-        blood_perfusion_rate=0.008,  # [1/s]
+        heat_transfer_rate=559,  # [ml/min/kg]
     )
 
     # Shared grid configuration
@@ -258,12 +257,8 @@ class SimulationConfig:
             "thermal": {
                 "time": {
                     "dt": self.thermal.dt,
-                    "steps": self.thermal.steps,
+                    "t_end": self.thermal.t_end,
                     "save_every": self.thermal.save_every,
-                },
-                "source": {
-                    "magnitude": self.thermal.source_magnitude,
-                    "sigma": self.thermal.source_sigma,
                 },
                 "blood": {
                     "density": self.thermal.blood_density,
