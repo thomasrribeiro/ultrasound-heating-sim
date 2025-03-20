@@ -103,11 +103,8 @@ class BioheatSimulator:
         self.w_b = torch.zeros((self.nx, self.ny, self.nz), device=self.device)
         self.absorption = torch.zeros((self.nx, self.ny, self.nz), device=self.device)
 
-        # Initialize arterial temperature to be uniform
-        self.T_a = (
-            torch.ones((self.nx, self.ny, self.nz), device=self.device)
-            * self.config.thermal.arterial_temperature
-        )
+        # Initialize arterial temperature as a scalar
+        self.T_a = self.config.thermal.arterial_temperature
 
         # Set properties for each tissue layer based on layer map
         for i, tissue in enumerate(self.config.tissue_layers):
