@@ -126,7 +126,7 @@ class ThermalConfig:
 
     # Time stepping parameters
     dt: float = 0.01  # time step [s]
-    t_end: float = 10.0  # end time [s]
+    t_end: float = 1000.0  # end time [s]
     save_every: int = 100  # save visualization every N steps
 
     # Blood properties
@@ -148,7 +148,7 @@ class SimulationConfig:
                 density=1000,  # [kg/m^3]
                 absorption_coefficient=0,  # [Np/m] at 2 MHz
                 specific_heat=3630,  # [J/(kg·K)]
-                thermal_conductivity=0.51,  # [W/(m·K)] Insulating boundary condition (worst case)
+                thermal_conductivity=0,  # [W/(m·K)] Insulating boundary condition (worst case)
                 thickness=4e-3,  # 4 mm
                 heat_transfer_rate=559,  # [ml/min/kg]
             ),
