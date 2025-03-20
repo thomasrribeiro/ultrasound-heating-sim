@@ -1,11 +1,93 @@
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
+import torch.jit
 import time
-from typing import Dict, Any, Tuple, Optional
+from typing import Optional
 import h5py
 
 from src.config import SimulationConfig
+
+
+# Define a standalone JIT-compiled function for bioheat equation solving
+@torch.jit.script
+def solve_bioheat_step_jit(
+    T: torch.Tensor,
+    T_padded: torch.Tensor,
+    Kt_padded: torch.Tensor,
+    A: torch.Tensor,
+    B: torch.Tensor,
+    Q: torch.Tensor,
+    T_a: float,
+    inv_dx: float,
+    inv_dy: float,
+    inv_dz: float,
+    dt: float,
+) -> torch.Tensor:
+    """
+    JIT-compiled function to perform one time step of the bioheat equation solver.
+
+    Args:
+        T: Current temperature field
+        T_padded: Padded temperature field
+        Kt_padded: Padded thermal conductivity field
+        A: ρ·c term
+        B: Blood perfusion term w_b·ρ_b·c_b
+        Q: Heat source term
+        T_a: Arterial blood temperature
+        inv_dx, inv_dy, inv_dz: Inverse of grid spacing
+        dt: Time step
+
+    Returns:
+        Updated temperature field
+    """
+    # Compute averaged Kt values at cell faces
+    Kt_x_plus = (Kt_padded[2:, 1:-1, 1:-1] + Kt_padded[1:-1, 1:-1, 1:-1]) * 0.5
+    Kt_x_minus = (Kt_padded[1:-1, 1:-1, 1:-1] + Kt_padded[0:-2, 1:-1, 1:-1]) * 0.5
+
+    Kt_y_plus = (Kt_padded[1:-1, 2:, 1:-1] + Kt_padded[1:-1, 1:-1, 1:-1]) * 0.5
+    Kt_y_minus = (Kt_padded[1:-1, 1:-1, 1:-1] + Kt_padded[1:-1, 0:-2, 1:-1]) * 0.5
+
+    Kt_z_plus = (Kt_padded[1:-1, 1:-1, 2:] + Kt_padded[1:-1, 1:-1, 1:-1]) * 0.5
+    Kt_z_minus = (Kt_padded[1:-1, 1:-1, 1:-1] + Kt_padded[1:-1, 1:-1, 0:-2]) * 0.5
+
+    # Compute temperature gradients
+    T_grad_x_plus = (T_padded[2:, 1:-1, 1:-1] - T_padded[1:-1, 1:-1, 1:-1]) * inv_dx
+    T_grad_x_minus = (T_padded[1:-1, 1:-1, 1:-1] - T_padded[0:-2, 1:-1, 1:-1]) * inv_dx
+
+    T_grad_y_plus = (T_padded[1:-1, 2:, 1:-1] - T_padded[1:-1, 1:-1, 1:-1]) * inv_dy
+    T_grad_y_minus = (T_padded[1:-1, 1:-1, 1:-1] - T_padded[1:-1, 0:-2, 1:-1]) * inv_dy
+
+    T_grad_z_plus = (T_padded[1:-1, 1:-1, 2:] - T_padded[1:-1, 1:-1, 1:-1]) * inv_dz
+    T_grad_z_minus = (T_padded[1:-1, 1:-1, 1:-1] - T_padded[1:-1, 1:-1, 0:-2]) * inv_dz
+
+    # Compute fluxes at cell faces
+    flux_x_plus = Kt_x_plus * T_grad_x_plus
+    flux_x_minus = Kt_x_minus * T_grad_x_minus
+
+    flux_y_plus = Kt_y_plus * T_grad_y_plus
+    flux_y_minus = Kt_y_minus * T_grad_y_minus
+
+    flux_z_plus = Kt_z_plus * T_grad_z_plus
+    flux_z_minus = Kt_z_minus * T_grad_z_minus
+
+    # Compute divergence of fluxes
+    diffusion = (
+        (flux_x_plus - flux_x_minus) * inv_dx
+        + (flux_y_plus - flux_y_minus) * inv_dy
+        + (flux_z_plus - flux_z_minus) * inv_dz
+    )
+
+    # Perfusion term: -B * (T - Ta) with spatially-varying B and Ta
+    perfusion = -B * (T - T_a)
+
+    # Heat source term
+    heat_source = Q
+
+    # Update temperature: T_new = T + dt * (diffusion + perfusion + source) / A with spatially-varying A
+    dTdt = (diffusion + perfusion + heat_source) / A
+    T_new = T + dt * dTdt
+
+    return T_new
 
 
 class BioheatSimulator:
@@ -51,6 +133,10 @@ class BioheatSimulator:
         # Layer map
         self.layer_map = None
 
+        # Pre-allocated tensors for padding
+        self._padded_buffer = None
+        self._pad_shape = None
+
     def setup_mesh(self):
         """Set up the computational grid.
 
@@ -70,6 +156,15 @@ class BioheatSimulator:
         self.Ly = self.config.grid.Ly
         self.Lz = self.config.grid.Lz
 
+        # Pre-compute reciprocals for faster computation
+        self.inv_dx = 1.0 / self.dx
+        self.inv_dy = 1.0 / self.dy
+        self.inv_dz = 1.0 / self.dz
+
+        # Pre-allocate buffer for padded tensor
+        self._pad_shape = (self.nx + 2, self.ny + 2, self.nz + 2)
+        self._padded_buffer = torch.zeros(self._pad_shape, device=self.device)
+
         # Create coordinate meshgrid for visualization purposes
         self.x = np.linspace(0, self.Lx, self.nx)
         self.y = np.linspace(0, self.Ly, self.ny)
@@ -87,6 +182,54 @@ class BioheatSimulator:
         )
 
         self.layer_map = torch.from_numpy(self.config.layer_map).to(self.device)
+
+    def pad_3d_replicate(self, x, pad_width=1):
+        """
+        Manual implementation of replicate padding for 3D tensor.
+
+        Args:
+            x: Input 3D tensor
+            pad_width: Width of padding
+
+        Returns:
+            Padded tensor
+        """
+        nx, ny, nz = x.shape
+        # Create output tensor with padding
+        padded = torch.zeros(
+            (nx + 2 * pad_width, ny + 2 * pad_width, nz + 2 * pad_width),
+            dtype=x.dtype,
+            device=x.device,
+        )
+
+        # Copy original data to center
+        padded[pad_width:-pad_width, pad_width:-pad_width, pad_width:-pad_width] = x
+
+        # Pad x-direction (left and right faces)
+        padded[:pad_width, pad_width:-pad_width, pad_width:-pad_width] = x[0:1].repeat(
+            pad_width, 1, 1
+        )
+        padded[-pad_width:, pad_width:-pad_width, pad_width:-pad_width] = x[-1:].repeat(
+            pad_width, 1, 1
+        )
+
+        # Pad y-direction (top and bottom faces)
+        padded[:, :pad_width, pad_width:-pad_width] = padded[
+            :, pad_width : pad_width + 1, pad_width:-pad_width
+        ].repeat(1, pad_width, 1)
+        padded[:, -pad_width:, pad_width:-pad_width] = padded[
+            :, -pad_width - 1 : -pad_width, pad_width:-pad_width
+        ].repeat(1, pad_width, 1)
+
+        # Pad z-direction (front and back faces)
+        padded[:, :, :pad_width] = padded[:, :, pad_width : pad_width + 1].repeat(
+            1, 1, pad_width
+        )
+        padded[:, :, -pad_width:] = padded[:, :, -pad_width - 1 : -pad_width].repeat(
+            1, 1, pad_width
+        )
+
+        return padded
 
     def setup_tissue_properties(self):
         """
@@ -151,54 +294,6 @@ class BioheatSimulator:
             )
         return self.Q
 
-    def pad_3d_replicate(self, x, pad_width=1):
-        """
-        Manual implementation of replicate padding for 3D tensor.
-
-        Args:
-            x: Input 3D tensor
-            pad_width: Width of padding
-
-        Returns:
-            Padded tensor
-        """
-        nx, ny, nz = x.shape
-        # Create output tensor with padding
-        padded = torch.zeros(
-            (nx + 2 * pad_width, ny + 2 * pad_width, nz + 2 * pad_width),
-            dtype=x.dtype,
-            device=x.device,
-        )
-
-        # Copy original data to center
-        padded[pad_width:-pad_width, pad_width:-pad_width, pad_width:-pad_width] = x
-
-        # Pad x-direction (left and right faces)
-        padded[:pad_width, pad_width:-pad_width, pad_width:-pad_width] = x[0:1].repeat(
-            pad_width, 1, 1
-        )
-        padded[-pad_width:, pad_width:-pad_width, pad_width:-pad_width] = x[-1:].repeat(
-            pad_width, 1, 1
-        )
-
-        # Pad y-direction (top and bottom faces)
-        padded[:, :pad_width, pad_width:-pad_width] = padded[
-            :, pad_width : pad_width + 1, pad_width:-pad_width
-        ].repeat(1, pad_width, 1)
-        padded[:, -pad_width:, pad_width:-pad_width] = padded[
-            :, -pad_width - 1 : -pad_width, pad_width:-pad_width
-        ].repeat(1, pad_width, 1)
-
-        # Pad z-direction (front and back faces)
-        padded[:, :, :pad_width] = padded[:, :, pad_width : pad_width + 1].repeat(
-            1, 1, pad_width
-        )
-        padded[:, :, -pad_width:] = padded[:, :, -pad_width - 1 : -pad_width].repeat(
-            1, 1, pad_width
-        )
-
-        return padded
-
     def solve_bioheat_step(self, T, dt):
         """
         Perform one time step of the bioheat equation solver with spatially-varying parameters.
@@ -218,70 +313,20 @@ class BioheatSimulator:
         # Pad parameter fields for stencil operations
         Kt_padded = self.pad_3d_replicate(self.Kt, pad_width=1)
 
-        # Compute diffusion term div(Kt * grad(T)) with spatially-varying Kt
-        # For x-direction: (Kt_{i+1/2,j,k} * (T_{i+1,j,k} - T_{i,j,k}) - Kt_{i-1/2,j,k} * (T_{i,j,k} - T_{i-1,j,k})) / dx²
-        # where Kt_{i+1/2,j,k} is approximated as (Kt_{i+1,j,k} + Kt_{i,j,k})/2
-
-        # Compute averaged Kt values at cell faces
-        Kt_x_plus = (Kt_padded[2:, 1:-1, 1:-1] + Kt_padded[1:-1, 1:-1, 1:-1]) / 2
-        Kt_x_minus = (Kt_padded[1:-1, 1:-1, 1:-1] + Kt_padded[0:-2, 1:-1, 1:-1]) / 2
-
-        Kt_y_plus = (Kt_padded[1:-1, 2:, 1:-1] + Kt_padded[1:-1, 1:-1, 1:-1]) / 2
-        Kt_y_minus = (Kt_padded[1:-1, 1:-1, 1:-1] + Kt_padded[1:-1, 0:-2, 1:-1]) / 2
-
-        Kt_z_plus = (Kt_padded[1:-1, 1:-1, 2:] + Kt_padded[1:-1, 1:-1, 1:-1]) / 2
-        Kt_z_minus = (Kt_padded[1:-1, 1:-1, 1:-1] + Kt_padded[1:-1, 1:-1, 0:-2]) / 2
-
-        # Compute fluxes at cell faces
-        flux_x_plus = (
-            Kt_x_plus
-            * (T_padded[2:, 1:-1, 1:-1] - T_padded[1:-1, 1:-1, 1:-1])
-            / self.dx
+        # Use the JIT-compiled function for the computation
+        T_new = solve_bioheat_step_jit(
+            T=T,
+            T_padded=T_padded,
+            Kt_padded=Kt_padded,
+            A=self.A,
+            B=self.B,
+            Q=self.Q,
+            T_a=float(self.T_a),
+            inv_dx=float(self.inv_dx),
+            inv_dy=float(self.inv_dy),
+            inv_dz=float(self.inv_dz),
+            dt=float(dt),
         )
-        flux_x_minus = (
-            Kt_x_minus
-            * (T_padded[1:-1, 1:-1, 1:-1] - T_padded[0:-2, 1:-1, 1:-1])
-            / self.dx
-        )
-
-        flux_y_plus = (
-            Kt_y_plus
-            * (T_padded[1:-1, 2:, 1:-1] - T_padded[1:-1, 1:-1, 1:-1])
-            / self.dy
-        )
-        flux_y_minus = (
-            Kt_y_minus
-            * (T_padded[1:-1, 1:-1, 1:-1] - T_padded[1:-1, 0:-2, 1:-1])
-            / self.dy
-        )
-
-        flux_z_plus = (
-            Kt_z_plus
-            * (T_padded[1:-1, 1:-1, 2:] - T_padded[1:-1, 1:-1, 1:-1])
-            / self.dz
-        )
-        flux_z_minus = (
-            Kt_z_minus
-            * (T_padded[1:-1, 1:-1, 1:-1] - T_padded[1:-1, 1:-1, 0:-2])
-            / self.dz
-        )
-
-        # Compute divergence of fluxes
-        diffusion = (
-            (flux_x_plus - flux_x_minus) / self.dx
-            + (flux_y_plus - flux_y_minus) / self.dy
-            + (flux_z_plus - flux_z_minus) / self.dz
-        )
-
-        # Perfusion term: -B * (T - Ta) with spatially-varying B and Ta
-        perfusion = -self.B * (T - self.T_a)
-
-        # Heat source term
-        heat_source = self.Q
-
-        # Update temperature: T_new = T + dt * (diffusion + perfusion + source) / A with spatially-varying A
-        dTdt = (diffusion + perfusion + heat_source) / self.A
-        T_new = T + dt * dTdt
 
         return T_new
 
