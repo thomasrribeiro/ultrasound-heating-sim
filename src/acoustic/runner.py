@@ -1,10 +1,11 @@
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from src.acoustic.simulator import SkullPressureSimulator
+from src.acoustic.simulator import PressureSimulator
 from src.acoustic.visualization import (
     plot_medium_properties,
     plot_intensity_field,
+    make_pressure_video,
 )
 from src.config import SimulationConfig
 
@@ -14,7 +15,7 @@ def run_acoustic_simulation(config: SimulationConfig, output_dir: str) -> np.nda
     print("\n=== Starting Acoustic Simulation ===")
 
     # Initialize simulator
-    simulator = SkullPressureSimulator(config)
+    simulator = PressureSimulator(config)
 
     # Set up the grid
     print("Setting up grid...")
@@ -26,7 +27,7 @@ def run_acoustic_simulation(config: SimulationConfig, output_dir: str) -> np.nda
 
     # Plot the medium properties
     fig, ax = plot_medium_properties(simulator.medium.sound_speed, config)
-    plt.savefig(os.path.join(output_dir, "medium_properties.png"))
+    plt.savefig(os.path.join(output_dir, "A0_medium_properties.png"))
     plt.close()
 
     # Set up source and sensor
@@ -54,7 +55,7 @@ def run_acoustic_simulation(config: SimulationConfig, output_dir: str) -> np.nda
     plt.title("Max Pressure Field")
     plt.xlabel("X position [grid points]")
     plt.ylabel("Z position [grid points]")
-    plt.savefig(os.path.join(output_dir, "max_pressure.png"))
+    plt.savefig(os.path.join(output_dir, "A1_max_pressure.png"))
     plt.close()
 
     # Compute intensity fields
@@ -67,12 +68,20 @@ def run_acoustic_simulation(config: SimulationConfig, output_dir: str) -> np.nda
         config,
         title="Time-Averaged Intensity Field",
     )
-    plt.savefig(os.path.join(output_dir, "intensity_field.png"))
+    plt.savefig(os.path.join(output_dir, "A2_intensity_field.png"))
     plt.close()
 
     # Save intensity data
     intensity_path = os.path.join(output_dir, "average_intensity.npy")
     np.save(intensity_path, average_intensity)
     print(f"Saved intensity data to {intensity_path}")
+
+    # make pressure video
+    make_pressure_video(
+        pressure_data[:, config.grid.Ny // 2, :],
+        config.acoustic.dt,
+        downsample=10,
+        filename=os.path.join(output_dir, "A3_pressure_video.mp4"),
+    )
 
     return average_intensity

@@ -23,46 +23,35 @@ def plot_medium_properties(
     ax.set_ylabel("Z position [grid points]")
 
     # Add layer annotations
-    z_start = config.initial_tissue_z
-    skin_points = int(config.skin.thickness / config.grid.dz)
-    skull_points = int(config.skull.thickness / config.grid.dz)
+    current_z = 0
 
-    # Add horizontal lines for layer boundaries
-    ax.axhline(y=z_start, color="w", linestyle="--", alpha=0.5)
-    ax.axhline(y=z_start + skin_points, color="w", linestyle="--", alpha=0.5)
-    ax.axhline(
-        y=z_start + skin_points + skull_points, color="w", linestyle="--", alpha=0.5
-    )
+    # Add horizontal line at tissue start
+    ax.axhline(y=0, color="w", linestyle="--", alpha=0.5)
 
-    # Add layer labels
+    # Add layer boundaries and labels for each tissue layer except the last one
+    for tissue in config.tissue_layers[:-1]:
+        if tissue.thickness is not None:
+            points = int(tissue.thickness / config.grid.dz)
+            if points > 0:
+                next_z = current_z + points
+                # Add boundary line
+                ax.axhline(y=next_z, color="w", linestyle="--", alpha=0.5)
+                # Add layer label
+                ax.text(
+                    config.grid.Nx // 2,
+                    current_z + points // 2,
+                    tissue.name.capitalize(),
+                    color="w",
+                    ha="center",
+                    fontsize=12,
+                )
+                current_z = next_z
+
+    # Add label for the last (innermost) layer
     ax.text(
         config.grid.Nx // 2,
-        z_start - 5,
-        "Water",
-        color="w",
-        ha="center",
-        fontsize=12,
-    )
-    ax.text(
-        config.grid.Nx // 2,
-        z_start + skin_points // 2,
-        "Skin",
-        color="w",
-        ha="center",
-        fontsize=12,
-    )
-    ax.text(
-        config.grid.Nx // 2,
-        z_start + skin_points + skull_points // 2,
-        "Skull",
-        color="w",
-        ha="center",
-        fontsize=12,
-    )
-    ax.text(
-        config.grid.Nx // 2,
-        z_start + skin_points + skull_points + 10,
-        "Brain",
+        current_z + 10,
+        config.tissue_layers[-1].name.capitalize(),
         color="w",
         ha="center",
         fontsize=12,
@@ -96,27 +85,55 @@ def plot_medium_properties(
 
 
 def plot_pressure_field(
-    pressure_data: np.ndarray,
-    time_step: int,
+    pressure_field: np.ndarray,
     config: SimulationConfig,
-    slice_y: int | None = None,
-) -> Tuple[plt.Figure, plt.Axes]:
-    """Plot the pressure field at a specific time step."""
-    if slice_y is None:
-        slice_y = config.grid.Ny // 2
-
-    fig, ax = plt.subplots(figsize=(12, 8))
-    # Take a slice at the specified Y position
-    im = ax.imshow(
-        pressure_data[time_step, :, slice_y, :].T,
-        cmap="coolwarm",
+    z_start: int,
+    title: str = "Pressure Field",
+    cmap: str = "RdBu",
+    vmax: float | None = None,
+) -> None:
+    """Plot a 2D slice of the pressure field."""
+    plt.figure(figsize=(10, 6))
+    plt.imshow(
+        pressure_field[:, pressure_field.shape[1] // 2, :].T,
+        aspect="equal",
+        cmap=cmap,
+        vmax=vmax,
+        vmin=-vmax if vmax is not None else None,
     )
-    plt.colorbar(im, label="Pressure [Pa]")
-    ax.set_title(f"Pressure Field in Tissue Layers - Time step {time_step}")
-    ax.set_xlabel("X position [grid points]")
-    ax.set_ylabel("Z position [grid points]")
 
-    return fig, ax
+    # Add tissue layer boundaries
+    current_z = z_start
+    for i, tissue in enumerate(config.tissue_layers[:-1]):  # Skip last layer
+        if tissue.thickness is not None:
+            points = int(tissue.thickness / config.grid.dz)
+            if points > 0:
+                next_z = current_z + points
+                plt.axhline(y=next_z, color="w", linestyle="--", alpha=0.5)
+
+                # Add tissue label in the middle of each layer
+                plt.text(
+                    pressure_field.shape[0] + 5,
+                    current_z + points // 2,
+                    tissue.name.capitalize(),
+                    color="white",
+                    verticalalignment="center",
+                )
+                current_z = next_z
+
+    # Add label for the last (innermost) layer
+    plt.text(
+        pressure_field.shape[0] + 5,
+        current_z + 10,
+        config.tissue_layers[-1].name.capitalize(),
+        color="white",
+        verticalalignment="center",
+    )
+
+    plt.colorbar(label="Pressure [Pa]")
+    plt.title(title)
+    plt.xlabel("X")
+    plt.ylabel("Z")
 
 
 def plot_intensity_field(
@@ -161,7 +178,6 @@ def make_pressure_video(
     filename: str = "pressure_wave.mp4",
 ):
     """Make a video of the pressure field."""
-    # %%
 
     # Get global min/max for consistent colorbar
     vmin = pressure_data.min()

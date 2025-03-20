@@ -6,6 +6,9 @@ import numpy as np
 
 @dataclass
 class TissueProperties:
+    # Identity
+    name: str  # Name of the tissue type
+
     # Acoustic properties
     sound_speed: float  # [m/s]
     density: float  # [kg/m^3]
@@ -103,6 +106,19 @@ class AcousticConfig:
     # Source and sensor positions
     source_z_pos: int = 10
 
+    # References to other configurations (will be set in SimulationConfig)
+    _grid: Optional["GridConfig"] = None
+    _tissue_layers: Optional[list["TissueProperties"]] = None
+
+    @property
+    def dt(self) -> float:
+        """Time step [s]"""
+        if self._grid is None or self._tissue_layers is None:
+            raise ValueError("_grid and _tissue_layers must be set before accessing dt")
+        # Get maximum sound speed across all tissue layers
+        max_sound_speed = max(tissue.sound_speed for tissue in self._tissue_layers)
+        return self.cfl * self._grid.dx / max_sound_speed
+
 
 @dataclass
 class ThermalConfig:
@@ -123,34 +139,49 @@ class ThermalConfig:
 class SimulationConfig:
     """Complete simulation configuration containing both acoustic and thermal parts."""
 
-    # Tissue layers
-    skin: TissueProperties = TissueProperties(
-        sound_speed=1624,  # [m/s]
-        density=1109,  # [kg/m^3]
-        thickness=2e-3,  # 2 mm
-        absorption_coefficient=42.3,  # [Np/m] at 2 MHz
-        specific_heat=3391,  # [J/(kg·K)]
-        thermal_conductivity=0.37,  # [W/(m·K)]
-        heat_transfer_rate=106,  # [ml/min/kg]
-    )
-
-    skull: TissueProperties = TissueProperties(
-        sound_speed=2770,  # [m/s]
-        density=1908,  # [kg/m^3]
-        thickness=7e-3,  # 7 mm
-        absorption_coefficient=109.1,  # [Np/m] at 2 MHz
-        specific_heat=1313,  # [J/(kg·K)]
-        thermal_conductivity=0.32,  # [W/(m·K)]
-        heat_transfer_rate=10,  # [ml/min/kg]
-    )
-
-    brain: TissueProperties = TissueProperties(
-        sound_speed=1546,  # [m/s]
-        density=1046,  # [kg/m^3]
-        absorption_coefficient=16.75,  # [Np/m] at 2 MHz
-        specific_heat=3630,  # [J/(kg·K)]
-        thermal_conductivity=0.51,  # [W/(m·K)]
-        heat_transfer_rate=559,  # [ml/min/kg]
+    # Tissue layers - ordered from outermost to innermost
+    tissue_layers: list[TissueProperties] = field(
+        default_factory=lambda: [
+            TissueProperties(
+                name="gel",
+                sound_speed=1624,  # [m/s]
+                density=1000,  # [kg/m^3]
+                absorption_coefficient=0,  # [Np/m] at 2 MHz
+                specific_heat=3630,  # [J/(kg·K)]
+                thermal_conductivity=0.51,  # [W/(m·K)] Insulating boundary condition (worst case)
+                thickness=4e-3,  # 4 mm
+                heat_transfer_rate=559,  # [ml/min/kg]
+            ),
+            TissueProperties(
+                name="skin",
+                sound_speed=1624,  # [m/s]
+                density=1109,  # [kg/m^3]
+                thickness=2e-3,  # 2 mm
+                absorption_coefficient=42.3,  # [Np/m] at 2 MHz
+                specific_heat=3391,  # [J/(kg·K)]
+                thermal_conductivity=0.37,  # [W/(m·K)]
+                heat_transfer_rate=106,  # [ml/min/kg]
+            ),
+            TissueProperties(
+                name="skull",
+                sound_speed=2770,  # [m/s]
+                density=1908,  # [kg/m^3]
+                thickness=7e-3,  # 7 mm
+                absorption_coefficient=109.1,  # [Np/m] at 2 MHz
+                specific_heat=1313,  # [J/(kg·K)]
+                thermal_conductivity=0.32,  # [W/(m·K)]
+                heat_transfer_rate=10,  # [ml/min/kg]
+            ),
+            TissueProperties(
+                name="brain",
+                sound_speed=1546,  # [m/s]
+                density=1046,  # [kg/m^3]
+                absorption_coefficient=16.75,  # [Np/m] at 2 MHz
+                specific_heat=3630,  # [J/(kg·K)]
+                thermal_conductivity=0.51,  # [W/(m·K)]
+                heat_transfer_rate=559,  # [ml/min/kg]
+            ),
+        ]
     )
 
     # Shared grid configuration
@@ -160,26 +191,18 @@ class SimulationConfig:
     acoustic: AcousticConfig = field(default_factory=AcousticConfig)
     thermal: ThermalConfig = field(default_factory=ThermalConfig)
 
-    # Position where tissue starts in the z-dimension (for acoustic sim)
-    initial_tissue_z: int = 20
-
     def __post_init__(self):
         # Compute blood perfusion coefficient for thermal simulation (B = ρ_b·c_b·w_b)
-        self.skin.B = (
-            self.thermal.blood_density
-            * self.thermal.blood_specific_heat
-            * self.skin.blood_perfusion_rate
-        )
-        self.skull.B = (
-            self.thermal.blood_density
-            * self.thermal.blood_specific_heat
-            * self.skull.blood_perfusion_rate
-        )
-        self.brain.B = (
-            self.thermal.blood_density
-            * self.thermal.blood_specific_heat
-            * self.brain.blood_perfusion_rate
-        )
+        for tissue in self.tissue_layers:
+            tissue.B = (
+                self.thermal.blood_density
+                * self.thermal.blood_specific_heat
+                * tissue.blood_perfusion_rate
+            )
+
+        # Set references in acoustic config
+        self.acoustic._grid = self.grid
+        self.acoustic._tissue_layers = self.tissue_layers
 
     @property
     def layer_map(self):
@@ -188,36 +211,33 @@ class SimulationConfig:
 
         Returns:
             A tensor with integer values representing tissue types:
-            0 = skin, 1 = skull, 2 = brain
+            The value corresponds to the index in tissue_layers (0 = first layer, 1 = second layer, etc.)
         """
-        # Initialize the layer map with all brain tissue (value 2)
-        layer_map = 2 * np.ones(
+        # Initialize the layer map with the last tissue type (innermost layer)
+        layer_map = (len(self.tissue_layers) - 1) * np.ones(
             (self.grid.Nx, self.grid.Ny, self.grid.Nz),
             dtype=np.long,
         )
 
-        # Convert tissue thicknesses to grid points
-        skin_thickness_points = int(self.skin.thickness / self.grid.dz)
-        skull_thickness_points = int(self.skull.thickness / self.grid.dz)
+        # Start position for first layer
+        current_z = 0
 
-        # Start positions for layers (assuming layers are along z direction)
-        skin_start = self.initial_tissue_z
-        skull_start = skin_start + skin_thickness_points
-        brain_start = skull_start + skull_thickness_points
+        # Assign regions for all layers except the last one (which fills the remaining space)
+        for i, tissue in enumerate(self.tissue_layers[:-1]):
+            if tissue.thickness is None:
+                raise ValueError(f"Tissue layer {i} must have a thickness specified")
 
-        # Assign skin (0) and skull (1) regions
-        if skin_thickness_points > 0:
-            layer_map[:, :, skin_start:skull_start] = 0  # Skin
-
-        if skull_thickness_points > 0:
-            layer_map[:, :, skull_start:brain_start] = 1  # Skull
+            thickness_points = int(tissue.thickness / self.grid.dz)
+            if thickness_points > 0:
+                next_z = current_z + thickness_points
+                layer_map[:, :, current_z:next_z] = i
+                current_z = next_z
 
         return layer_map
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the config to a dictionary for saving."""
         return {
-            "initial_tissue_z": self.initial_tissue_z,
             "grid": {
                 "domain_size_x": self.grid.domain_size_x,
                 "domain_size_y": self.grid.domain_size_y,
@@ -247,7 +267,6 @@ class SimulationConfig:
                 "medium": {
                     "alpha_coeff": self.acoustic.alpha_coeff,
                     "alpha_power": self.acoustic.alpha_power,
-                    "BonA": self.acoustic.BonA,
                 },
                 "positions": {
                     "source_z": self.acoustic.source_z_pos,
@@ -266,46 +285,19 @@ class SimulationConfig:
                 },
             },
             "tissues": {
-                "skin": {
+                tissue.name: {
                     "acoustic": {
-                        "sound_speed": self.skin.sound_speed,
-                        "density": self.skin.density,
-                        "thickness": self.skin.thickness,
-                        "absorption_coefficient_db_cm": self.skin.absorption_coefficient_db_cm,
-                        "absorption_coefficient_np_m": self.skin.absorption_coefficient,
+                        "sound_speed": tissue.sound_speed,
+                        "density": tissue.density,
+                        "thickness": tissue.thickness,
+                        "absorption_coefficient_np_m": tissue.absorption_coefficient,
                     },
                     "thermal": {
-                        "specific_heat": self.skin.specific_heat,
-                        "thermal_conductivity": self.skin.thermal_conductivity,
-                        "blood_perfusion_rate": self.skin.blood_perfusion_rate,
+                        "specific_heat": tissue.specific_heat,
+                        "thermal_conductivity": tissue.thermal_conductivity,
+                        "blood_perfusion_rate": tissue.blood_perfusion_rate,
                     },
-                },
-                "skull": {
-                    "acoustic": {
-                        "sound_speed": self.skull.sound_speed,
-                        "density": self.skull.density,
-                        "thickness": self.skull.thickness,
-                        "absorption_coefficient_db_cm": self.skull.absorption_coefficient_db_cm,
-                        "absorption_coefficient_np_m": self.skull.absorption_coefficient,
-                    },
-                    "thermal": {
-                        "specific_heat": self.skull.specific_heat,
-                        "thermal_conductivity": self.skull.thermal_conductivity,
-                        "blood_perfusion_rate": self.skull.blood_perfusion_rate,
-                    },
-                },
-                "brain": {
-                    "acoustic": {
-                        "sound_speed": self.brain.sound_speed,
-                        "density": self.brain.density,
-                        "absorption_coefficient_db_cm": self.brain.absorption_coefficient_db_cm,
-                        "absorption_coefficient_np_m": self.brain.absorption_coefficient,
-                    },
-                    "thermal": {
-                        "specific_heat": self.brain.specific_heat,
-                        "thermal_conductivity": self.brain.thermal_conductivity,
-                        "blood_perfusion_rate": self.brain.blood_perfusion_rate,
-                    },
-                },
+                }
+                for tissue in self.tissue_layers
             },
         }

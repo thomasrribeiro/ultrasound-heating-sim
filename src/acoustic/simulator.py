@@ -14,7 +14,7 @@ from kwave.utils.signals import tone_burst
 from src.config import SimulationConfig
 
 
-class SkullPressureSimulator:
+class PressureSimulator:
     def __init__(self, config: SimulationConfig):
         self.config = config
         self.kgrid: Optional[kWaveGrid] = None
@@ -30,9 +30,11 @@ class SkullPressureSimulator:
             [self.config.grid.dx, self.config.grid.dy, self.config.grid.dz],
         )
 
-        # Calculate time step
-        c_max = self.config.skull.sound_speed  # use maximum sound speed for stability
-        self.kgrid.makeTime(c_max, t_end=self.config.acoustic.t_end)
+        # Calculate time step using maximum sound speed for stability
+        c_max = max(tissue.sound_speed for tissue in self.config.tissue_layers)
+        self.kgrid.makeTime(
+            c_max, cfl=self.config.acoustic.cfl, t_end=self.config.acoustic.t_end
+        )
 
         return self.kgrid
 
@@ -52,18 +54,11 @@ class SkullPressureSimulator:
         # Get layer map from config
         layer_map = self.config.layer_map
 
-        # Set properties based on layer map
-        # Skin (0)
-        self.medium.sound_speed[layer_map == 0] = self.config.skin.sound_speed
-        self.medium.density[layer_map == 0] = self.config.skin.density
-
-        # Skull (1)
-        self.medium.sound_speed[layer_map == 1] = self.config.skull.sound_speed
-        self.medium.density[layer_map == 1] = self.config.skull.density
-
-        # Brain (2)
-        self.medium.sound_speed[layer_map == 2] = self.config.brain.sound_speed
-        self.medium.density[layer_map == 2] = self.config.brain.density
+        # Set properties for each tissue layer based on layer map
+        for i, tissue in enumerate(self.config.tissue_layers):
+            mask = layer_map == i
+            self.medium.sound_speed[mask] = tissue.sound_speed
+            self.medium.density[mask] = tissue.density
 
         return self.medium
 

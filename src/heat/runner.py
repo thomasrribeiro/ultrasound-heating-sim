@@ -35,11 +35,11 @@ def run_heat_simulation(
         origin="lower",
         cmap="viridis",
     )
-    plt.colorbar(label="Tissue Type (0=skin, 1=skull, 2=brain)")
+    plt.colorbar(label="Tissue Layer Index")
     plt.title("Tissue Layer Map - Thermal Simulation (XZ mid-slice)")
     plt.xlabel("X")
     plt.ylabel("Z (tissue region only)")
-    plt.savefig(os.path.join(output_dir, "thermal_tissue_layer_map.png"))
+    plt.savefig(os.path.join(output_dir, "T0_thermal_tissue_layer_map.png"))
     plt.close()
 
     # Setup tissue properties
@@ -60,17 +60,17 @@ def run_heat_simulation(
 
     # Temperature evolution
     fig, _ = plot_temperature_evolution(times, max_temps)
-    plt.savefig(os.path.join(output_dir, "temperature_evolution.png"))
+    plt.savefig(os.path.join(output_dir, "T1_temperature_evolution.png"))
     plt.close()
 
     # Temperature distribution
     fig, _ = plot_temperature_field_slices(T_history[-1], config)
-    plt.savefig(os.path.join(output_dir, "temperature_distribution.png"))
+    plt.savefig(os.path.join(output_dir, "T2_temperature_distribution.png"))
     plt.close()
 
     # Combined acoustic intensity and temperature visualization
     fig, _ = visualize_combined_results(intensity_tensor, T_history[-1], config)
-    plt.savefig(os.path.join(output_dir, "acoustic_thermal_combined.png"))
+    plt.savefig(os.path.join(output_dir, "T3_acoustic_thermal_combined.png"))
     plt.close()
 
     # Create temperature evolution video
@@ -79,7 +79,7 @@ def run_heat_simulation(
         T_history[::5],
         config,
         times[::5],
-        os.path.join(output_dir, "temperature_evolution.mp4"),
+        os.path.join(output_dir, "T4_temperature_evolution.mp4"),
     )
 
     print(f"Temperature history shape: {T_history.shape}")

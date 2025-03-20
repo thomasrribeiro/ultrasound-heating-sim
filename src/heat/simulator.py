@@ -92,60 +92,26 @@ class BioheatSimulator:
         """
         Set up spatially-varying tissue properties using the layer map from config.
         """
-        # Initialize uniform property fields with default values
-        self.rho = (
-            torch.ones((self.nx, self.ny, self.nz), device=self.device)
-            * self.config.brain.density
-        )
-        self.c = (
-            torch.ones((self.nx, self.ny, self.nz), device=self.device)
-            * self.config.brain.specific_heat
-        )
-        self.k = (
-            torch.ones((self.nx, self.ny, self.nz), device=self.device)
-            * self.config.brain.thermal_conductivity
-        )
-        self.w_b = (
-            torch.ones((self.nx, self.ny, self.nz), device=self.device)
-            * self.config.brain.blood_perfusion_rate
-        )
-        self.T_a = (
-            torch.ones((self.nx, self.ny, self.nz), device=self.device)
-            * self.config.thermal.arterial_temperature
-        )
-        self.absorption = (
-            torch.ones((self.nx, self.ny, self.nz), device=self.device)
-            * self.config.brain.absorption_coefficient
-        )
-
         # Make sure we have a layer map
         if self.layer_map is None:
             raise RuntimeError("Layer map not initialized. Call setup_mesh() first.")
 
-        # Use the layer map to set tissue properties
-        # Assuming layer_map has values:
-        # 0 = skin, 1 = skull, 2 = brain
+        # Initialize uniform property fields with default (innermost tissue) values
+        self.rho = torch.zeros((self.nx, self.ny, self.nz), device=self.device)
+        self.c = torch.zeros((self.nx, self.ny, self.nz), device=self.device)
+        self.k = torch.zeros((self.nx, self.ny, self.nz), device=self.device)
+        self.w_b = torch.zeros((self.nx, self.ny, self.nz), device=self.device)
+        self.T_a = torch.zeros((self.nx, self.ny, self.nz), device=self.device)
+        self.absorption = torch.zeros((self.nx, self.ny, self.nz), device=self.device)
 
-        skin_mask = self.layer_map == 0
-        skull_mask = self.layer_map == 1
-        brain_mask = self.layer_map == 2
-
-        # Assign properties based on masks
-        # Skin
-        self.rho[skin_mask] = self.config.skin.density
-        self.c[skin_mask] = self.config.skin.specific_heat
-        self.k[skin_mask] = self.config.skin.thermal_conductivity
-        self.w_b[skin_mask] = self.config.skin.blood_perfusion_rate
-        self.absorption[skin_mask] = self.config.skin.absorption_coefficient
-
-        # Skull
-        self.rho[skull_mask] = self.config.skull.density
-        self.c[skull_mask] = self.config.skull.specific_heat
-        self.k[skull_mask] = self.config.skull.thermal_conductivity
-        self.w_b[skull_mask] = self.config.skull.blood_perfusion_rate
-        self.absorption[skull_mask] = self.config.skull.absorption_coefficient
-
-        # Brain properties are already set as default
+        # Set properties for each tissue layer based on layer map
+        for i, tissue in enumerate(self.config.tissue_layers):
+            mask = self.layer_map == i
+            self.rho[mask] = tissue.density
+            self.c[mask] = tissue.specific_heat
+            self.k[mask] = tissue.thermal_conductivity
+            self.w_b[mask] = tissue.blood_perfusion_rate
+            self.absorption[mask] = tissue.absorption_coefficient
 
         # Compute derived parameters
         self.A = self.rho * self.c  # [J/(m³·K)]
@@ -405,11 +371,12 @@ class BioheatSimulator:
         max_temps: list,
         T_history: torch.Tensor,
     ) -> None:
-        """Save simulation results and configuration to HDF5 file.
+        """
+        Save simulation results to an HDF5 file.
 
         Args:
-            filename: Path to save the HDF5 file
-            T: Final temperature field tensor (Nx, Ny, Nz)
+            filename: Output file name
+            T: Final temperature field
             times: List of simulation times
             max_temps: List of maximum temperatures
             T_history: Temperature history tensor (Nt, Nx, Ny, Nz)
@@ -453,18 +420,18 @@ class BioheatSimulator:
             for key, value in config_dict["thermal"]["source"].items():
                 source_group.attrs[key] = value
 
-            # Save tissue properties
-            for tissue_name in ["skin", "skull", "brain"]:
-                tissue_group = tissues_group.create_group(tissue_name)
-                for key, value in config_dict["tissues"][tissue_name][
+            # Save tissue properties for each layer
+            for tissue in self.config.tissue_layers:
+                tissue_group = tissues_group.create_group(tissue.name)
+                # Save thermal properties
+                for key, value in config_dict["tissues"][tissue.name][
                     "thermal"
                 ].items():
                     tissue_group.attrs[key] = value
-
-            # Save acoustic properties relevant to heating
-            for key, value in config_dict["tissues"][tissue_name]["acoustic"].items():
-                if key == "absorption_coefficient":
-                    source_group.attrs[f"{tissue_name}_{key}"] = value
+                # Save acoustic properties relevant to heating
+                tissue_group.attrs["absorption_coefficient"] = (
+                    tissue.absorption_coefficient
+                )
 
             # Save blood properties
             blood_group = tissues_group.create_group("blood")
