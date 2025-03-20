@@ -13,9 +13,19 @@ import numpy as np
 
 
 def run_heat_simulation(
-    config: SimulationConfig, intensity_data: np.ndarray, output_dir: str
+    config: SimulationConfig,
+    intensity_data: np.ndarray,
+    output_dir: str,
+    steady_state: bool = False,
 ):
-    """Run the bioheat simulation using provided intensity data."""
+    """Run the bioheat simulation using provided intensity data.
+
+    Args:
+        config: The simulation configuration
+        intensity_data: The acoustic intensity field
+        output_dir: Directory to save output
+        steady_state: If True, use the steady state solver
+    """
     print("\n=== Starting Heat Simulation ===")
 
     # Initialize simulator
@@ -53,35 +63,53 @@ def run_heat_simulation(
 
     # Run simulation
     print("Running bioheat simulation...")
-    T_history, times, max_temps = simulator.run_simulation()
+    T_history, times, max_temps = simulator.run_simulation(steady_state=steady_state)
 
     # Visualize results
     print("Plotting results...")
 
-    # Temperature evolution
-    fig, _ = plot_temperature_evolution(times, max_temps)
-    plt.savefig(os.path.join(output_dir, "T1_temperature_evolution.png"))
-    plt.close()
+    if steady_state:
+        # For steady state, we only create the final temperature distribution plots
+        print("Creating steady state temperature visualizations...")
 
-    # Temperature distribution
-    fig, _ = plot_temperature_field_slices(T_history[-1], config)
-    plt.savefig(os.path.join(output_dir, "T2_temperature_distribution.png"))
-    plt.close()
+        # Temperature distribution
+        fig, _ = plot_temperature_field_slices(T_history[0], config)
+        plt.savefig(os.path.join(output_dir, "T1_steady_state_temperature.png"))
+        plt.close()
 
-    # Combined acoustic intensity and temperature visualization
-    fig, _ = visualize_combined_results(intensity_tensor, T_history[-1], config)
-    plt.savefig(os.path.join(output_dir, "T3_acoustic_thermal_combined.png"))
-    plt.close()
+        # Combined acoustic intensity and temperature visualization
+        fig, _ = visualize_combined_results(intensity_tensor, T_history[0], config)
+        plt.savefig(os.path.join(output_dir, "T2_steady_state_combined.png"))
+        plt.close()
 
-    # Create temperature evolution video
-    print("Creating temperature evolution video...")
-    make_temperature_video(
-        T_history[::5],
-        config,
-        times[::5],
-        os.path.join(output_dir, "T4_temperature_evolution.mp4"),
-    )
+        print(f"Steady state temperature shape: {T_history.shape}")
+        print("Simulation complete!")
+    else:
+        # For time-dependent simulation, create all plots
+        # Temperature evolution
+        fig, _ = plot_temperature_evolution(times, max_temps)
+        plt.savefig(os.path.join(output_dir, "T1_temperature_evolution.png"))
+        plt.close()
 
-    print(f"Temperature history shape: {T_history.shape}")
-    print(f"Number of time points: {len(times)}")
-    print("Simulation complete!")
+        # Temperature distribution
+        fig, _ = plot_temperature_field_slices(T_history[-1], config)
+        plt.savefig(os.path.join(output_dir, "T2_temperature_distribution.png"))
+        plt.close()
+
+        # Combined acoustic intensity and temperature visualization
+        fig, _ = visualize_combined_results(intensity_tensor, T_history[-1], config)
+        plt.savefig(os.path.join(output_dir, "T3_acoustic_thermal_combined.png"))
+        plt.close()
+
+        # Create temperature evolution video
+        print("Creating temperature evolution video...")
+        make_temperature_video(
+            T_history[::5],
+            config,
+            times[::5],
+            os.path.join(output_dir, "T4_temperature_evolution.mp4"),
+        )
+
+        print(f"Temperature history shape: {T_history.shape}")
+        print(f"Number of time points: {len(times)}")
+        print("Simulation complete!")

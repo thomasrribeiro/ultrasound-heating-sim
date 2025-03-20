@@ -330,15 +330,135 @@ class BioheatSimulator:
 
         return T_new
 
-    def run_simulation(self):
+    def solve_steady_state_gpu(self, tol=1e-6, max_iter=10000):
+        """
+        Solve for the steady state temperature field on the GPU via a matrix-free
+        conjugate gradient method.
+
+        We solve:
+
+            -div(Kt grad(T)) + B*T = B*T_a + Q
+
+        Args:
+            tol: Convergence tolerance for the residual.
+            max_iter: Maximum number of CG iterations.
+
+        Returns:
+            T: Steady state temperature field as a torch.Tensor of shape (nx, ny, nz).
+        """
+        nx, ny, nz = self.nx, self.ny, self.nz
+        device = self.device
+
+        # Precompute factors for finite differences
+        idx2 = 1.0 / (self.dx * self.dx)
+        idy2 = 1.0 / (self.dy * self.dy)
+        idz2 = 1.0 / (self.dz * self.dz)
+
+        # Define the operator function in a matrix-free manner.
+        # Given a temperature field T (shape [nx,ny,nz]),
+        # it returns L(T) = -div(Kt grad(T)) + B*T.
+        def apply_operator(T):
+            # Use replicate padding for T and for Kt.
+            T_pad = self.pad_3d_replicate(T, pad_width=1)
+            K_pad = self.pad_3d_replicate(self.Kt, pad_width=1)
+
+            # x-direction differences
+            flux_x_plus = (
+                0.5
+                * (K_pad[2:, 1:-1, 1:-1] + K_pad[1:-1, 1:-1, 1:-1])
+                * (T_pad[2:, 1:-1, 1:-1] - T_pad[1:-1, 1:-1, 1:-1])
+                * idx2
+            )
+            flux_x_minus = (
+                0.5
+                * (K_pad[1:-1, 1:-1, 1:-1] + K_pad[:-2, 1:-1, 1:-1])
+                * (T_pad[1:-1, 1:-1, 1:-1] - T_pad[:-2, 1:-1, 1:-1])
+                * idx2
+            )
+
+            # y-direction differences
+            flux_y_plus = (
+                0.5
+                * (K_pad[1:-1, 2:, 1:-1] + K_pad[1:-1, 1:-1, 1:-1])
+                * (T_pad[1:-1, 2:, 1:-1] - T_pad[1:-1, 1:-1, 1:-1])
+                * idy2
+            )
+            flux_y_minus = (
+                0.5
+                * (K_pad[1:-1, 1:-1, 1:-1] + K_pad[1:-1, :-2, 1:-1])
+                * (T_pad[1:-1, 1:-1, 1:-1] - T_pad[1:-1, :-2, 1:-1])
+                * idy2
+            )
+
+            # z-direction differences
+            flux_z_plus = (
+                0.5
+                * (K_pad[1:-1, 1:-1, 2:] + K_pad[1:-1, 1:-1, 1:-1])
+                * (T_pad[1:-1, 1:-1, 2:] - T_pad[1:-1, 1:-1, 1:-1])
+                * idz2
+            )
+            flux_z_minus = (
+                0.5
+                * (K_pad[1:-1, 1:-1, 1:-1] + K_pad[1:-1, 1:-1, :-2])
+                * (T_pad[1:-1, 1:-1, 1:-1] - T_pad[1:-1, 1:-1, :-2])
+                * idz2
+            )
+
+            # Divergence: (flux_x_plus - flux_x_minus) + ... etc.
+            divergence = (
+                flux_x_plus
+                - flux_x_minus
+                + flux_y_plus
+                - flux_y_minus
+                + flux_z_plus
+                - flux_z_minus
+            )
+
+            # The operator L(T) = -divergence + B*T.
+            return -divergence + self.B * T
+
+        # Right-hand side of the linear system: b = B*T_a + Q.
+        b = self.B * float(self.T_a) + self.Q
+
+        # Initialize the solution with the arterial temperature everywhere.
+        T = torch.ones((nx, ny, nz), device=device) * float(self.T_a)
+
+        # Initialize CG variables:
+        r = b - apply_operator(T)
+        p = r.clone()
+        rsold = torch.sum(r * r)
+
+        for it in range(max_iter):
+            Ap = apply_operator(p)
+            alpha = rsold / torch.sum(p * Ap)
+            T = T + alpha * p
+            r = r - alpha * Ap
+            rsnew = torch.sum(r * r)
+            if torch.sqrt(rsnew) < tol:
+                print(
+                    f"CG converged in {it+1} iterations with residual {torch.sqrt(rsnew):.3e}"
+                )
+                break
+            p = r + (rsnew / rsold) * p
+            rsold = rsnew
+        else:
+            print(
+                f"CG did not converge in {max_iter} iterations, residual = {torch.sqrt(rsnew):.3e}"
+            )
+
+        return T
+
+    def run_simulation(self, steady_state: bool = False):
         """Run the bioheat simulation.
+
+        Args:
+            steady_state: If True, use the steady state solver instead of time stepping.
 
         Returns:
             Tuple containing:
-            - Final temperature field tensor (Nx, Ny, Nz)
+            - Temperature history tensor (Nt, Nx, Ny, Nz)
             - List of simulation times
             - List of maximum temperatures
-            - Temperature history tensor (Nt, Nx, Ny, Nz)
         """
         # Check if setup has been completed
         if self.A is None or self.Kt is None or self.B is None or self.Q is None:
@@ -350,6 +470,26 @@ class BioheatSimulator:
         dt = self.config.thermal.dt
         t_end = self.config.thermal.t_end
         save_every = self.config.thermal.save_every
+
+        # Handle steady state case
+        if steady_state:
+            print("Using steady state solver...")
+            start_time = time.time()
+
+            # Solve for steady state
+            T = self.solve_steady_state_gpu()
+
+            # Create minimal history for consistent return format
+            times = [0.0]
+            max_temps = [float(torch.max(T).cpu().numpy())]
+            T_history = np.zeros((1, self.nx, self.ny, self.nz))
+            T_history[0] = T.cpu().numpy()
+
+            elapsed = time.time() - start_time
+            print(f"Steady state solution completed in {elapsed:.2f} seconds")
+            print(f"Max temperature: {max_temps[0]:.6f}°C\n")
+
+            return T_history, times, max_temps
 
         # Calculate number of steps
         steps = int(t_end / dt)

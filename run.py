@@ -23,6 +23,11 @@ def main():
         default="data",
         help="Directory to save output files (default: data)",
     )
+    parser.add_argument(
+        "--steady-state",
+        action="store_true",
+        help="Use steady state solver for heat simulation instead of time stepping",
+    )
     args = parser.parse_args()
 
     # Create output directory
@@ -44,7 +49,9 @@ def main():
         intensity_data = run_acoustic_simulation(config, args.output_dir)
 
     # Run heat simulation
-    run_heat_simulation(config, intensity_data, args.output_dir)
+    run_heat_simulation(
+        config, intensity_data, args.output_dir, steady_state=args.steady_state
+    )
 
 
 if __name__ == "__main__":
