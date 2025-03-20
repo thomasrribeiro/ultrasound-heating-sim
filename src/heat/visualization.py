@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from typing import Tuple, Optional
 import torch
-from config import SimulationConfig
+from src.config import SimulationConfig
 
 
 def plot_temperature_evolution(

@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from typing import Tuple
-from config import SimulationConfig
+from src.config import SimulationConfig
 import matplotlib.animation as animation
 
 

@@ -110,7 +110,7 @@ class ThermalConfig:
 
     # Time stepping parameters
     dt: float = 0.01  # time step [s]
-    t_end: float = 1000.0  # end time [s]
+    t_end: float = 10.0  # end time [s]
     save_every: int = 100  # save visualization every N steps
 
     # Blood properties
