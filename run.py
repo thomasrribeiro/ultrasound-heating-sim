@@ -13,6 +13,11 @@ from src.config import SimulationConfig
 def main():
     parser = argparse.ArgumentParser(description="Run acoustic and/or heat simulations")
     parser.add_argument(
+        "--use_cpu",
+        action="store_true",
+        help="Use CPU for computations (default: False). Use --use_cpu to enable.",
+    )
+    parser.add_argument(
         "--intensity-file",
         type=str,
         help="Path to pre-computed intensity data (.npy file). If not provided, acoustic simulation will be run.",
@@ -46,7 +51,9 @@ def main():
         intensity_data = np.load(args.intensity_file)
     else:
         # Run acoustic simulation
-        intensity_data = run_acoustic_simulation(config, args.output_dir)
+        intensity_data = run_acoustic_simulation(
+            config, args.output_dir, use_gpu=not args.use_cpu
+        )
 
     # Run heat simulation
     run_heat_simulation(

@@ -10,7 +10,9 @@ from src.acoustic.visualization import (
 from src.config import SimulationConfig
 
 
-def run_acoustic_simulation(config: SimulationConfig, output_dir: str) -> np.ndarray:
+def run_acoustic_simulation(
+    config: SimulationConfig, output_dir: str, use_gpu: bool = True
+) -> np.ndarray:
     """Run the acoustic simulation to generate intensity data."""
     print("\n=== Starting Acoustic Simulation ===")
 
@@ -36,7 +38,7 @@ def run_acoustic_simulation(config: SimulationConfig, output_dir: str) -> np.nda
 
     # Run the simulation
     print("Running acoustic simulation...")
-    sensor_data = simulator.run_simulation(use_gpu=True)
+    sensor_data = simulator.run_simulation(use_gpu=use_gpu)
 
     # Process and reshape the pressure data
     pressure_data = sensor_data["p"].reshape(
